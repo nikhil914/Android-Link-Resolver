@@ -2,6 +2,7 @@ package com.nik.linkresolver
 
 import android.app.Application
 import com.nik.linkresolver.data.BatchManager
+import com.nik.linkresolver.data.CollectionManager
 import com.nik.linkresolver.data.DebugStore
 import com.nik.linkresolver.data.db.AppDatabase
 import com.nik.linkresolver.data.Settings
@@ -12,6 +13,7 @@ import com.nik.linkresolver.net.NetworkHelper
 import com.nik.linkresolver.net.OkHttpFactory
 import com.nik.linkresolver.service.ChannelWatchWorker
 import com.nik.linkresolver.service.HealthCheckWorker
+import kotlinx.coroutines.launch
 import com.nik.linkresolver.telegram.TelegramClient
 import com.nik.linkresolver.telegram.TelegramPrefs
 
@@ -29,6 +31,7 @@ class AppGraph(app: Application) {
     val db = AppDatabase.create(app)
     val batches = BatchManager(app, db.resolves(), registry)
     val telegram by lazy { TelegramClient(app, TelegramPrefs(app)) }
+    val collections = CollectionManager(db.collections(), { telegram }, batches, registry, appScope)
 }
 
 class LinkResolverApp : Application() {
@@ -38,6 +41,8 @@ class LinkResolverApp : Application() {
         super.onCreate()
         HealthCheckWorker.schedule(this, graph.settings.healthCheck)
         ChannelWatchWorker.schedule(this, graph.settings.watchIntervalMin)
+        // A collection save cut off by a killed process is no longer running.
+        graph.appScope.launch { graph.db.collections().clearStaleSaving() }
     }
 }
 

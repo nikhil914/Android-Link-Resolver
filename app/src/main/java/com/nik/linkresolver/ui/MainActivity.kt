@@ -63,6 +63,7 @@ import com.nik.linkresolver.telegram.TelegramViewModel
 class MainActivity : FragmentActivity() {
     private val vm: MainViewModel by viewModels()
     private val tgVm: TelegramViewModel by viewModels()
+    private val savedVm: SavedViewModel by viewModels()
     private var linkStatus by mutableStateOf(LINK_HOSTS.associateWith { LinkStatus.UNKNOWN })
     private var tab by mutableStateOf(TAB_HOME)
     private var openBatch by mutableStateOf<Long?>(null)
@@ -139,6 +140,11 @@ class MainActivity : FragmentActivity() {
                         icon = { Text("✈") }, label = { Text("Telegram") },
                     )
                     NavigationBarItem(
+                        selected = tab == TAB_SAVED && openBatch == null,
+                        onClick = { tab = TAB_SAVED; openBatch = null },
+                        icon = { Text("★") }, label = { Text("Saved") },
+                    )
+                    NavigationBarItem(
                         selected = tab == TAB_HISTORY && openBatch == null,
                         onClick = { tab = TAB_HISTORY; openBatch = null },
                         icon = { Text("☰") }, label = { Text("History") },
@@ -156,7 +162,11 @@ class MainActivity : FragmentActivity() {
             when {
                 batch != null -> BatchScreen(vm, batch, m)
                 tab == TAB_HISTORY -> HistoryScreen(vm, m)
-                tab == TAB_TELEGRAM -> TelegramScreen(tgVm, onOpenBatch = { openBatch = it }, modifier = m)
+                tab == TAB_TELEGRAM -> TelegramScreen(
+                    tgVm, onOpenBatch = { openBatch = it }, modifier = m,
+                    onOpenCollection = { id -> savedVm.openCollection(id); tab = TAB_SAVED },
+                )
+                tab == TAB_SAVED -> SavedScreen(savedVm, onOpenBatch = { openBatch = it }, modifier = m)
                 tab == TAB_SETTINGS -> SettingsScreen(
                     application.graph, linkStatus, onEnableLinks = ::openLinkSettings,
                     onShareDebug = { application.graph.debugStore.shareIntent()?.let(::startActivity) ?: toast("No debug data yet") },
@@ -282,6 +292,7 @@ class MainActivity : FragmentActivity() {
         const val TAB_HISTORY = "history"
         const val TAB_TELEGRAM = "telegram"
         const val TAB_SETTINGS = "settings"
+        const val TAB_SAVED = "saved"
 
         const val EXTRA_CHAT = "chat"
         const val EXTRA_CHAT_TITLE = "chat_title"

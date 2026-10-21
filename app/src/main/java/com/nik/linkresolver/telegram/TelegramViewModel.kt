@@ -183,6 +183,23 @@ class TelegramViewModel(app: Application) : AndroidViewModel(app) {
 
     fun isWatched(id: Long) = tg.prefs.isWatched(id)
 
+    /** Saves the whole history of the open channel under [name]; [onSaved] gets the collection id. */
+    fun saveWholeChannel(name: String, onSaved: (Long) -> Unit) {
+        val st = channel.value ?: return
+        viewModelScope.launch { onSaved(g.collections.saveWholeChannel(st.chat.id, st.chat.title, name)) }
+    }
+
+    /** Saves the posts holding the selected links (only those links) under [name]. */
+    fun saveSelection(name: String, onSaved: (Long) -> Unit) {
+        val st = channel.value ?: return
+        val sel = selected.value
+        if (sel.isEmpty()) return
+        viewModelScope.launch {
+            onSaved(g.collections.saveSelection(st.chat.id, st.chat.title, name, st.posts, sel))
+            selected.value = emptySet()
+        }
+    }
+
     // ---- selection
 
     fun toggle(url: String) = selected.update { if (url in it) it - url else it + url }

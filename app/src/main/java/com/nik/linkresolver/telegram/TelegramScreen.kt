@@ -56,7 +56,12 @@ import com.nik.linkresolver.ui.formatTime
 import com.nik.linkresolver.ui.openUrl
 
 @Composable
-fun TelegramScreen(vm: TelegramViewModel, onOpenBatch: (Long) -> Unit, modifier: Modifier = Modifier) {
+fun TelegramScreen(
+    vm: TelegramViewModel,
+    onOpenBatch: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    onOpenCollection: (Long) -> Unit = {},
+) {
     val auth by vm.auth.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
@@ -110,7 +115,7 @@ fun TelegramScreen(vm: TelegramViewModel, onOpenBatch: (Long) -> Unit, modifier:
             }
             TgAuth.Ready -> {
                 val ch = channel
-                if (ch == null) ChatList(vm) else ChannelView(vm, ch, onOpenBatch)
+                if (ch == null) ChatList(vm) else ChannelView(vm, ch, onOpenBatch, onOpenCollection)
             }
         }
     }
@@ -246,8 +251,11 @@ private fun ChatList(vm: TelegramViewModel) {
 }
 
 @Composable
-private fun ChannelView(vm: TelegramViewModel, st: ChannelState, onOpenBatch: (Long) -> Unit) {
+private fun ChannelView(vm: TelegramViewModel, st: ChannelState, onOpenBatch: (Long) -> Unit, onOpenCollection: (Long) -> Unit) {
+    val ctx = LocalContext.current
     val selected by vm.selected.collectAsStateWithLifecycle()
+    var saveDialog by remember { mutableStateOf<String?>(null) } // "all" | "selection"
+    val today = remember { java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(java.util.Date()) }
     val known by vm.known.collectAsStateWithLifecycle()
     var fresh by rememberSaveable { mutableStateOf(false) }
     BackHandler { vm.closeChat() }
@@ -255,6 +263,21 @@ private fun ChannelView(vm: TelegramViewModel, st: ChannelState, onOpenBatch: (L
     val allLinks = remember(st.posts) { st.posts.flatMap { it.links }.distinct() }
     val doneCount = allLinks.count { known[it]?.status == Status.DONE }
     val newPosts = if (st.lastSeenId > 0) st.posts.count { it.messageId > st.lastSeenId } else 0
+
+    saveDialog?.let { kind ->
+        com.nik.linkresolver.ui.NameDialog(
+            title = if (kind == "all") "Save whole channel" else "Save ${selected.size} selected links",
+            initial = if (kind == "all") "${st.chat.title} — $today" else "${st.chat.title} — selection $today",
+            onDismiss = { saveDialog = null },
+        ) { name ->
+            saveDialog = null
+            val done: (Long) -> Unit = { id ->
+                android.widget.Toast.makeText(ctx, if (kind == "all") "Saving “$name” — see the Saved tab" else "Saved “$name”", android.widget.Toast.LENGTH_SHORT).show()
+                onOpenCollection(id)
+            }
+            if (kind == "all") vm.saveWholeChannel(name, done) else vm.saveSelection(name, done)
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -281,6 +304,12 @@ private fun ChannelView(vm: TelegramViewModel, st: ChannelState, onOpenBatch: (L
                             " · ${st.scanned} messages read",
                         style = MaterialTheme.typography.labelMedium,
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { saveDialog = "all" }) { Text("Save whole channel") }
+                        OutlinedButton(onClick = { saveDialog = "selection" }, enabled = selected.isNotEmpty()) {
+                            Text(if (selected.isEmpty()) "Save selected" else "Save ${selected.size} selected")
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         AssistChip(onClick = vm::selectUnresolved, label = { Text("Unresolved") })
                         if (newPosts > 0) AssistChip(onClick = vm::selectNew, label = { Text("New") })

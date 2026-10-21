@@ -48,9 +48,10 @@ class BatchManager(
         messageIds: Map<String, Long> = emptyMap(),
         /** false: only queue; the caller drains the queue itself (background jobs can't start the service). */
         start: Boolean = true,
+        collectionId: Long? = null,
     ): Long {
         val now = System.currentTimeMillis()
-        val batchId = dao.insertBatch(BatchEntity(createdAt = now, source = source, label = label))
+        val batchId = dao.insertBatch(BatchEntity(createdAt = now, source = source, label = label, collectionId = collectionId))
         val rows = urls.distinct().map { url ->
             val cached = if (fresh) null else dao.lastDone(url)
             ResolveEntity(

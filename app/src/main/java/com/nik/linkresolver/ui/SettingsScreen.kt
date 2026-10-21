@@ -70,6 +70,89 @@ fun SettingsScreen(
     ) {
         SetupCard(linkStatus, onEnableLinks)
 
+        // ---- background & shortcuts
+        var background by remember { mutableStateOf(s.backgroundMode) }
+        var tgDirect by remember { mutableStateOf(s.openTelegramDirectly) }
+        var lock by remember { mutableStateOf(s.appLock) }
+        val canLock = remember { AppLock.canLock(ctx) }
+        Section("Background and shortcuts") {
+            ToggleRow(
+                "Background mode",
+                "Tapped and shared links resolve without opening a screen; the final link arrives as a notification with Open and Copy.",
+                background,
+            ) { background = it; s.backgroundMode = it }
+            ToggleRow("Open Telegram links in Telegram", "Final t.me links skip the browser and open the Telegram app directly.", tgDirect) {
+                tgDirect = it
+                s.openTelegramDirectly = it
+            }
+            ToggleRow(
+                "App lock",
+                if (canLock) "Fingerprint, face or screen PIN to open the app (it holds your Telegram login). Link taps still resolve."
+                else "Set up a screen lock on the phone first.",
+                lock && canLock,
+            ) { if (canLock) { lock = it; s.appLock = it } }
+            Text(
+                "Quick Settings tile: pull down the quick settings, tap the pencil and drag “Resolve clipboard” in. " +
+                    "It resolves every link in the clipboard.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                OutlinedButton(onClick = { QsTile.requestAdd(ctx) }) { Text("Add tile") }
+            }
+        }
+
+        // ---- channel watch
+        val tgPrefs = g.telegram.prefs
+        var watched by remember { mutableStateOf(tgPrefs.watched()) }
+        var interval by remember { mutableStateOf(s.watchIntervalMin) }
+        var autoResolve by remember { mutableStateOf(s.watchAutoResolve) }
+        val watchRuns by remember { com.nik.linkresolver.service.ChannelWatchWorker.runningFlow(ctx) }.collectAsState(initial = emptyList())
+        val watching = watchRuns.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+        Section("Channel watch") {
+            Text(
+                if (watched.isEmpty()) "No channels watched. Open a channel in the Telegram tab and tap Watch."
+                else "Watched channels are checked for new posts; new links are resolved and sent as a notification.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            watched.forEach { (id, title) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("★ $title", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    TextButton(onClick = { tgPrefs.unwatch(id); watched = tgPrefs.watched() }) { Text("Stop") }
+                }
+            }
+            var open by remember { mutableStateOf(false) }
+            val options = listOf(0 to "Off", 15 to "Every 15 min", 30 to "Every 30 min", 60 to "Every hour", 180 to "Every 3 hours", 360 to "Every 6 hours")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Check", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { open = true }) { Text(options.firstOrNull { it.first == interval }?.second ?: "$interval min") }
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    options.forEach { (min, label) ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            interval = min
+                            s.watchIntervalMin = min
+                            com.nik.linkresolver.service.ChannelWatchWorker.schedule(ctx, min)
+                            open = false
+                        })
+                    }
+                }
+            }
+            ToggleRow("Resolve new links automatically", "Off: just notify, and you pick which to resolve.", autoResolve) {
+                autoResolve = it
+                s.watchAutoResolve = it
+            }
+            Text(
+                "Android may delay background checks to save battery. For reliable checks, exempt Link Resolver from " +
+                    "battery optimisation. At most ${com.nik.linkresolver.service.ChannelWatchWorker.MAX_LINKS_PER_RUN} links per check.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { com.nik.linkresolver.service.ChannelWatchWorker.runNow(ctx) }, enabled = watched.isNotEmpty() && !watching) {
+                    Text(if (watching) "Checking…" else "Check now")
+                }
+                OutlinedButton(onClick = { BatteryHelp.open(ctx) }) { Text("Battery settings") }
+            }
+        }
+
         // ---- domains
         Section("Shortener domains") {
             Text(

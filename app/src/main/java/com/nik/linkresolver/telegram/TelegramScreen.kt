@@ -209,7 +209,7 @@ private fun ChatList(vm: TelegramViewModel) {
                     Text("Recent", style = MaterialTheme.typography.titleSmall)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(recent, key = { it.first }) { (id, title) ->
-                            AssistChip(onClick = { vm.openRecent(id, title) }, label = { Text(title, maxLines = 1) })
+                            AssistChip(onClick = { vm.openRecent(id, title) }, label = { Text((if (vm.isWatched(id)) "★ " else "") + title, maxLines = 1) })
                         }
                     }
                 }
@@ -264,6 +264,16 @@ private fun ChannelView(vm: TelegramViewModel, st: ChannelState, onOpenBatch: (L
                         TextButton(onClick = vm::closeChat) { Text("‹ Chats") }
                         Text(st.chat.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         TextButton(onClick = vm::refresh, enabled = !st.loading) { Text("Refresh") }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (st.watching) "★ Watching: new posts are checked in the background and their links resolved"
+                            else "Watch this channel to get new links resolved automatically",
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (st.watching) OutlinedButton(onClick = vm::toggleWatch) { Text("Stop") }
+                        else Button(onClick = vm::toggleWatch, enabled = st.newestId != 0L) { Text("Watch") }
                     }
                     Text(
                         "${st.posts.size} posts with links · ${allLinks.size} links · $doneCount already resolved" +

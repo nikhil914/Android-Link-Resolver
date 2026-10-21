@@ -9,7 +9,7 @@ import android.content.pm.verify.domain.DomainVerificationUserState
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -60,18 +60,39 @@ import com.nik.linkresolver.graph
 import com.nik.linkresolver.telegram.TelegramScreen
 import com.nik.linkresolver.telegram.TelegramViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val vm: MainViewModel by viewModels()
     private val tgVm: TelegramViewModel by viewModels()
     private var linkStatus by mutableStateOf(LINK_HOSTS.associateWith { LinkStatus.UNKNOWN })
     private var tab by mutableStateOf(TAB_HOME)
     private var openBatch by mutableStateOf<Long?>(null)
 
+    private var locked by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleIntent(intent)
-        setContent { AppTheme { Root() } }
+        setContent { AppTheme { if (locked) LockScreen(onUnlock = ::promptUnlock) else Root() } }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val now = System.currentTimeMillis()
+        locked = application.graph.settings.appLock && AppLock.canLock(this) && now - lastUnlockedOrLeft > RELOCK_MS
+        if (locked) promptUnlock()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!locked) lastUnlockedOrLeft = System.currentTimeMillis()
+    }
+
+    private fun promptUnlock() {
+        AppLock.prompt(this) {
+            locked = false
+            lastUnlockedOrLeft = System.currentTimeMillis()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -82,6 +103,11 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent) {
         intent.getStringExtra(EXTRA_TAB)?.let { tab = it; openBatch = null }
         intent.getLongExtra(EXTRA_BATCH, -1).takeIf { it > 0 }?.let { tab = TAB_HOME; openBatch = it }
+        intent.getLongExtra(EXTRA_CHAT, 0).takeIf { it != 0L }?.let { chat ->
+            tab = TAB_TELEGRAM
+            openBatch = null
+            tgVm.openRecent(chat, intent.getStringExtra(EXTRA_CHAT_TITLE).orEmpty())
+        }
     }
 
     override fun onResume() {
@@ -256,6 +282,17 @@ class MainActivity : ComponentActivity() {
         const val TAB_HISTORY = "history"
         const val TAB_TELEGRAM = "telegram"
         const val TAB_SETTINGS = "settings"
+
+        const val EXTRA_CHAT = "chat"
+        const val EXTRA_CHAT_TITLE = "chat_title"
+        private const val RELOCK_MS = 60_000L
+
+        /** Time the app was last unlocked or left; the lock comes back after [RELOCK_MS] away. */
+        @Volatile private var lastUnlockedOrLeft = 0L
+
+        fun openChannel(context: Context, chatId: Long, title: String) = Intent(context, MainActivity::class.java)
+            .putExtra(EXTRA_CHAT, chatId).putExtra(EXTRA_CHAT_TITLE, title)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 
         fun openBatch(context: Context, batchId: Long) = Intent(context, MainActivity::class.java)
             .putExtra(EXTRA_BATCH, batchId)

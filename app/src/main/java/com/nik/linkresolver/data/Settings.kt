@@ -34,7 +34,36 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_FORWARD, null)
         set(v) = prefs.edit { putString(KEY_FORWARD, v) }
 
+    /** Final t.me links open the Telegram app directly (tg://). */
+    var openTelegramDirectly: Boolean
+        get() = prefs.getBoolean(KEY_TG_DIRECT, true)
+        set(v) = prefs.edit { putBoolean(KEY_TG_DIRECT, v) }
+
+    /** Tapped and shared single links resolve without opening a screen; a notification shows the result. */
+    var backgroundMode: Boolean
+        get() = prefs.getBoolean(KEY_BACKGROUND, false)
+        set(v) = prefs.edit { putBoolean(KEY_BACKGROUND, v) }
+
+    var appLock: Boolean
+        get() = prefs.getBoolean(KEY_LOCK, false)
+        set(v) = prefs.edit { putBoolean(KEY_LOCK, v) }
+
+    /** Background channel watch: interval in minutes (0 = off). */
+    var watchIntervalMin: Int
+        get() = prefs.getInt(KEY_WATCH, 60)
+        set(v) = prefs.edit { putInt(KEY_WATCH, v) }
+
+    /** Watched channels' new links are resolved automatically (else only notified). */
+    var watchAutoResolve: Boolean
+        get() = prefs.getBoolean(KEY_WATCH_AUTO, true)
+        set(v) = prefs.edit { putBoolean(KEY_WATCH_AUTO, v) }
+
     private companion object {
+        const val KEY_TG_DIRECT = "tg_direct"
+        const val KEY_BACKGROUND = "background_mode"
+        const val KEY_LOCK = "app_lock"
+        const val KEY_WATCH = "watch_interval"
+        const val KEY_WATCH_AUTO = "watch_auto"
         const val KEY_HEALTH = "health_check"
         const val KEY_BROWSER = "act_as_browser"
         const val KEY_FORWARD = "forward_browser"

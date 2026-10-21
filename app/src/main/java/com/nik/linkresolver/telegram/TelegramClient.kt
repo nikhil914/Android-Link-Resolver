@@ -7,6 +7,7 @@ import androidx.core.content.edit
 import com.nik.linkresolver.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
@@ -63,6 +64,36 @@ class TelegramPrefs(context: Context) {
         prefs.edit { putString("recent", list.joinToString("\n") { "${it.first}\t${it.second.replace('\n', ' ')}" }) }
     }
 
+    /** Watched channels (background check for new posts): id → title. */
+    fun watched(): List<Pair<Long, String>> =
+        prefs.getString("watched", "").orEmpty().split('\n').filter { it.isNotBlank() }.mapNotNull { line ->
+            val id = line.substringBefore('\t').toLongOrNull() ?: return@mapNotNull null
+            id to line.substringAfter('\t')
+        }
+
+    fun isWatched(id: Long) = watched().any { it.first == id }
+
+    /** Starts watching [id]; posts up to [fromMessageId] count as already handled. */
+    fun watch(id: Long, title: String, fromMessageId: Long) {
+        val list = watched().filter { it.first != id } + (id to title)
+        prefs.edit {
+            putString("watched", list.joinToString("\n") { "${it.first}\t${it.second.replace('\n', ' ')}" })
+            putLong("watch_mark_$id", fromMessageId)
+        }
+    }
+
+    fun unwatch(id: Long) {
+        val list = watched().filter { it.first != id }
+        prefs.edit {
+            putString("watched", list.joinToString("\n") { "${it.first}\t${it.second}" })
+            remove("watch_mark_$id")
+        }
+    }
+
+    /** Newest message id the watch has handled for [id]. */
+    fun watchMark(id: Long): Long = prefs.getLong("watch_mark_$id", 0)
+    fun setWatchMark(id: Long, messageId: Long) = prefs.edit { putLong("watch_mark_$id", messageId) }
+
     /** Newest message id seen per chat, to mark new posts. */
     fun lastSeen(chatId: Long): Long = prefs.getLong("seen_$chatId", 0)
     fun setLastSeen(chatId: Long, messageId: Long) = prefs.edit { putLong("seen_$chatId", messageId) }
@@ -91,6 +122,15 @@ class TelegramClient(private val context: Context, val prefs: TelegramPrefs) {
     }
 
     fun clearError() { _error.value = null }
+
+    /** Starts TDLib if needed and waits until logged in. False if not logged in (or not within [timeoutMs]). */
+    suspend fun awaitReady(timeoutMs: Long = 30_000): Boolean {
+        start()
+        val st = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            auth.first { it !is TgAuth.Starting && it !is TgAuth.LoggingOut }
+        }
+        return st is TgAuth.Ready
+    }
 
     private fun onUpdate(obj: TdApi.Object) {
         if (obj !is TdApi.UpdateAuthorizationState) return

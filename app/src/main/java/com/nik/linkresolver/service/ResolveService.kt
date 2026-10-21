@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.nik.linkresolver.R
 import com.nik.linkresolver.engine.QueueWorker
+import com.nik.linkresolver.engine.ResolveResult
 import com.nik.linkresolver.graph
 import com.nik.linkresolver.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +66,8 @@ class ResolveService : Service() {
         val lease = if (g.settings.forceMobileData) g.networks.acquireCellular() else null
         val client = lease?.let { g.http.boundTo(it.network) } ?: g.http.base
         val network = if (lease != null) "mobile data" else g.networks.describe()
+        val finals = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val failed = java.util.concurrent.atomic.AtomicInteger()
         try {
             do {
                 val worker = QueueWorker(
@@ -72,7 +75,14 @@ class ResolveService : Service() {
                     store = g.batches,
                     concurrency = { g.settings.concurrency },
                     onProgress = { id, e -> g.batches.onProgress(id, e) },
-                    onFinished = { _, _ -> scope.launch { updateProgress(network) } },
+                    onFinished = { _, r ->
+                        when (r) {
+                            is ResolveResult.Success -> finals += r.finalUrl
+                            is ResolveResult.Failure -> failed.incrementAndGet()
+                            null -> Unit
+                        }
+                        scope.launch { updateProgress(network) }
+                    },
                 )
                 g.batches.worker = worker
                 updateProgress(network)
@@ -82,8 +92,7 @@ class ResolveService : Service() {
             g.batches.worker = null
             lease?.close()
         }
-        val c = dao.counts(since)
-        notifyDone(c.done ?: 0, c.failed ?: 0)
+        ResultNotifier.notify(this, DONE_NOTIFICATION_ID, if (finals.size == 1) "Final link ready" else "Resolved", finals.toList(), failed.get())
         // A start that arrived while we were finishing means new links: run again instead of stopping.
         if (dao.queuedCount() > 0 || !stopSelfResult(lastStartId)) {
             job = scope.launch { runQueue() }
@@ -118,18 +127,6 @@ class ResolveService : Service() {
             .addAction(0, "Cancel all", cancel)
             .apply { if (progress != null) setProgress(progress.second, progress.first, false) }
             .build()
-    }
-
-    private fun notifyDone(done: Int, failed: Int) {
-        if (done + failed == 0) return
-        val n = NotificationCompat.Builder(this, CHANNEL_RESULTS)
-            .setSmallIcon(R.drawable.ic_stat_link)
-            .setContentTitle("Links resolved")
-            .setContentText("$done done" + if (failed > 0) ", $failed failed" else "")
-            .setAutoCancel(true)
-            .setContentIntent(openApp(MainActivity.TAB_HISTORY))
-            .build()
-        getSystemService(NotificationManager::class.java).notify(DONE_NOTIFICATION_ID, n)
     }
 
     private fun openApp(tab: String?): PendingIntent = PendingIntent.getActivity(

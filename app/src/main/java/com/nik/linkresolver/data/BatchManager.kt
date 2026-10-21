@@ -46,6 +46,8 @@ class BatchManager(
         fresh: Boolean = false,
         channel: String? = null,
         messageIds: Map<String, Long> = emptyMap(),
+        /** false: only queue; the caller drains the queue itself (background jobs can't start the service). */
+        start: Boolean = true,
     ): Long {
         val now = System.currentTimeMillis()
         val batchId = dao.insertBatch(BatchEntity(createdAt = now, source = source, label = label))
@@ -67,7 +69,7 @@ class BatchManager(
             )
         }
         dao.insertAll(rows)
-        if (rows.any { it.status == Status.QUEUED }) startService()
+        if (start && rows.any { it.status == Status.QUEUED }) startService()
         return batchId
     }
 
@@ -117,7 +119,12 @@ class BatchManager(
             w.wake()
         }
         // Always (re)start: a worker that just finished draining may be about to stop.
-        ContextCompat.startForegroundService(context, ResolveService.intent(context))
+        try {
+            ContextCompat.startForegroundService(context, ResolveService.intent(context))
+        } catch (e: IllegalStateException) {
+            // Android 12+ refuses to start a foreground service from the background (e.g. a background job);
+            // the links stay queued and the next run (app, worker or service) picks them up.
+        }
     }
 
     // ---- QueueStore (used by the worker inside the service)

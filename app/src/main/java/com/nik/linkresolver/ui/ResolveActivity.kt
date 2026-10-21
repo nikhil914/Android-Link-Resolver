@@ -59,6 +59,7 @@ class ResolveActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (savedInstanceState == null && inBackground(intent)) return // finishes itself once queued
         handle(intent) // no-op on rotation: the ViewModel already has this URL
         setContent {
             AppTheme {
@@ -80,7 +81,41 @@ class ResolveActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (inBackground(intent)) return
         handle(intent)
+    }
+
+    /**
+     * Background mode: a tapped or shared single link is queued (or answered from history) and the result comes as a
+     * notification; no screen is shown. Returns false when the normal screen should handle it.
+     */
+    private fun inBackground(intent: Intent): Boolean {
+        val g = application.graph
+        if (!g.settings.backgroundMode) return false
+        if (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_SEND) return false
+        if (!androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
+        val raw = when (intent.action) {
+            Intent.ACTION_VIEW -> intent.dataString
+            else -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        } ?: return false
+        val links = g.batches.extract(raw).ifEmpty { listOfNotNull(ResolverRunner.extractUrl(raw)?.let { ResolverRunner.normalize(it)?.toString() }) }
+        if (links.isEmpty()) return false
+        val source = if (intent.action == Intent.ACTION_VIEW) Source.LINK else Source.SHARE
+        // Queue while this (invisible) screen is still in front, so the foreground service may start; then close.
+        lifecycleScope.launch {
+            try {
+                val cached = if (links.size == 1) g.batches.lastDone(links[0]) else null
+                if (cached?.finalUrl != null) {
+                    com.nik.linkresolver.service.ResultNotifier.notify(applicationContext, 1003, "Already resolved", listOf(cached.finalUrl), 0)
+                } else {
+                    g.batches.enqueue(links, source, if (links.size == 1) "1 link" else "${links.size} links")
+                }
+            } finally {
+                finish()
+            }
+        }
+        toast(if (links.size == 1) "Resolving in the background…" else "Resolving ${links.size} links in the background…")
+        return true
     }
 
     private fun handle(intent: Intent) {

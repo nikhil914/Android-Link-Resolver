@@ -16,6 +16,8 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import com.nik.linkresolver.engine.TelegramUri
+import com.nik.linkresolver.graph
 
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
@@ -31,10 +33,24 @@ fun AppTheme(content: @Composable () -> Unit) {
 
 fun Context.openUrl(url: String) {
     try {
-        startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        startActivity(viewIntent(url))
     } catch (e: ActivityNotFoundException) {
         toast("No app can open this link")
     }
+}
+
+/**
+ * VIEW intent for a final link. t.me links go straight to the Telegram app (tg://) when it is installed and the
+ * setting is on, skipping the browser hop; otherwise the https link is used.
+ */
+fun Context.viewIntent(url: String): Intent {
+    val direct = (applicationContext as? android.app.Application)?.graph?.settings?.openTelegramDirectly ?: true
+    val tg = if (direct) TelegramUri.toApp(url) else null
+    if (tg != null) {
+        val i = Intent(Intent.ACTION_VIEW, tg.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (i.resolveActivity(packageManager) != null) return i
+    }
+    return Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 }
 
 fun Context.copyText(label: String, text: String) {

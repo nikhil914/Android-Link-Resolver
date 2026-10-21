@@ -10,12 +10,15 @@ import com.nik.linkresolver.engine.ResolverRegistry
 import com.nik.linkresolver.engine.ResolverRunner
 import com.nik.linkresolver.net.NetworkHelper
 import com.nik.linkresolver.net.OkHttpFactory
+import com.nik.linkresolver.service.ChannelWatchWorker
 import com.nik.linkresolver.service.HealthCheckWorker
 import com.nik.linkresolver.telegram.TelegramClient
 import com.nik.linkresolver.telegram.TelegramPrefs
 
 /** Manual object graph (no DI framework in v1). */
 class AppGraph(app: Application) {
+    /** Work that must outlive a screen (e.g. queueing a link from an activity that closes at once). */
+    val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
     val settings = Settings(app)
     val debugStore = DebugStore(app)
     val networks = NetworkHelper(app)
@@ -34,6 +37,7 @@ class LinkResolverApp : Application() {
     override fun onCreate() {
         super.onCreate()
         HealthCheckWorker.schedule(this, graph.settings.healthCheck)
+        ChannelWatchWorker.schedule(this, graph.settings.watchIntervalMin)
     }
 }
 

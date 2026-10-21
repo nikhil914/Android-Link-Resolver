@@ -13,6 +13,8 @@ junit = "4.13.2"
 room = "2.8.5"
 annotation = "1.11.0"
 work = "2.12.0"
+biometric = "1.1.0"
+fragment = "1.9.1"
 ksp = "2.3.12"
 
 [libraries]
@@ -34,6 +36,8 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-annotation = { module = "androidx.annotation:annotation", version.ref = "annotation" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
+fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref = "fragment" }
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }

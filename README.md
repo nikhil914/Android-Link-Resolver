@@ -9,6 +9,22 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
+## Watch channels, background mode, shortcuts
+
+- **Watch channels.** In a Telegram channel tap **Watch**. A WorkManager job (every 15 min – 6 h, default 1 h) reads
+  posts newer than the last handled one, picks out supported links not seen before, resolves them in the job itself
+  (at most 24 per check; the rest next time) and sends a notification with the final links (Copy all, tap = batch).
+  With *Resolve new links automatically* off it only notifies, and the tap opens the channel. Exempting the app from
+  battery optimisation makes checks more punctual.
+- **Background mode.** Tapped and shared single links resolve without opening a screen; the result is a notification
+  with **Open** and **Copy**.
+- **Quick Settings tile "Resolve clipboard".** Resolves every link in the clipboard (Android 13+: *Add tile* in
+  Settings).
+- **Open Telegram links in Telegram.** Final `t.me` links become `tg://` links (bot start, channel, post, invite), so
+  Telegram opens directly instead of via the browser.
+- **App lock.** Fingerprint, face or screen PIN to open the app (it holds the Telegram login). Relocks after a minute
+  away. Link taps still resolve without unlocking.
+
 ## New shortener domains, browser mode, site health (Settings tab)
 
 - **Generic resolver.** Any link you share or paste is tried with a generic AdLinkFly-style resolver, even if its

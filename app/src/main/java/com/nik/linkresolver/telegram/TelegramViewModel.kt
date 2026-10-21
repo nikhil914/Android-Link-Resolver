@@ -29,6 +29,10 @@ data class ChannelState(
     /** Posts with an id above this arrived since the last visit. */
     val lastSeenId: Long = 0,
     val error: String? = null,
+    /** Newest message id in the chat (from the first page). */
+    val newestId: Long = 0,
+    /** Checked in the background for new posts. */
+    val watching: Boolean = false,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -115,7 +119,7 @@ class TelegramViewModel(app: Application) : AndroidViewModel(app) {
         tg.prefs.addRecent(chat.id, chat.title)
         recent.value = tg.prefs.recentChats()
         selected.value = emptySet()
-        channel.value = ChannelState(chat, lastSeenId = tg.prefs.lastSeen(chat.id))
+        channel.value = ChannelState(chat, lastSeenId = tg.prefs.lastSeen(chat.id), watching = tg.prefs.isWatched(chat.id))
         loadMore(PAGE)
     }
 
@@ -143,6 +147,7 @@ class TelegramViewModel(app: Application) : AndroidViewModel(app) {
                         oldestId = messages.lastOrNull()?.id ?: cur.oldestId,
                         endReached = messages.size < count,
                         loading = false,
+                        newestId = if (cur.newestId == 0L) messages.firstOrNull()?.id ?: 0 else cur.newestId,
                     )
                 }
                 // Remember the newest post so the next visit can mark what's new.
@@ -156,9 +161,27 @@ class TelegramViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-reads from the newest message (e.g. to pick up new posts). */
     fun refresh() {
         val st = channel.value ?: return
-        channel.value = ChannelState(st.chat, lastSeenId = st.lastSeenId)
+        channel.value = ChannelState(st.chat, lastSeenId = st.lastSeenId, watching = st.watching)
         loadMore(PAGE)
     }
+
+    /** Watch on: posts from now on are checked in the background (existing posts count as handled). */
+    fun toggleWatch() {
+        val st = channel.value ?: return
+        if (st.watching) {
+            tg.prefs.unwatch(st.chat.id)
+        } else {
+            tg.prefs.watch(st.chat.id, st.chat.title, st.newestId)
+            if (g.settings.watchIntervalMin <= 0) {
+                g.settings.watchIntervalMin = 60
+                com.nik.linkresolver.service.ChannelWatchWorker.schedule(getApplication(), 60)
+            }
+        }
+        channel.update { it?.copy(watching = !st.watching) }
+        recent.value = tg.prefs.recentChats()
+    }
+
+    fun isWatched(id: Long) = tg.prefs.isWatched(id)
 
     // ---- selection
 

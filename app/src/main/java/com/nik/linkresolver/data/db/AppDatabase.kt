@@ -27,6 +27,8 @@ object Source {
     const val SHARE = "share"
     const val LINK = "link"
     const val TELEGRAM = "telegram"
+    const val CLIPBOARD = "clipboard"
+    const val WATCH = "watch"
 }
 
 @Entity(tableName = "batches")
@@ -149,6 +151,13 @@ abstract class ResolveDao {
     /** Most recent link that really resolved (not copied from history) for a site — the health check's test link. */
     @Query("SELECT * FROM resolves WHERE status = 'DONE' AND fromCache = 0 AND site = :site ORDER BY id DESC LIMIT 1")
     abstract suspend fun lastSuccessForSite(site: String): ResolveEntity?
+
+    /** True if this link was ever queued or resolved (any status except cancelled). */
+    @Query("SELECT EXISTS(SELECT 1 FROM resolves WHERE sourceUrl = :url AND status != 'CANCELLED')")
+    abstract suspend fun known(url: String): Boolean
+
+    @Query("SELECT * FROM resolves WHERE batchId = :batchId ORDER BY id")
+    abstract suspend fun batchRows(batchId: Long): List<ResolveEntity>
 
     @Query("SELECT COUNT(*) FROM resolves WHERE status = 'QUEUED'")
     abstract suspend fun queuedCount(): Int

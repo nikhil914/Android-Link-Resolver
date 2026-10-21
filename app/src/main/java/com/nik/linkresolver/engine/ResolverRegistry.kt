@@ -5,12 +5,31 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 
-/** Picks a resolver by host. Later versions add rule-driven resolvers here. */
-class ResolverRegistry(private val resolvers: List<Resolver>) {
-    fun find(url: HttpUrl): Resolver? = resolvers.firstOrNull { it.canHandle(url) }
+/**
+ * Picks a resolver by host. Built-in resolvers first; then the [generic] AdLinkFly resolver for domains in [domains]
+ * (added by the user or learned). [findAny] also tries the generic resolver on any other host — used for a single
+ * link the user explicitly hands over, never for links picked out of text.
+ */
+class ResolverRegistry(
+    private val resolvers: List<Resolver>,
+    private val generic: Resolver? = null,
+    val domains: DomainStore = DomainStore.NONE,
+) {
+    /** A resolver for a known shortener domain, or null. */
+    fun find(url: HttpUrl): Resolver? =
+        resolvers.firstOrNull { it.canHandle(url) } ?: generic?.takeIf { domains.contains(url.host) }
+
+    /** Like [find], but falls back to trying the generic resolver on any host. */
+    fun findAny(url: HttpUrl): Resolver? = find(url) ?: generic
+
+    fun isGeneric(r: Resolver) = r === generic
+
+    /** Domains handled by the built-in resolvers (for display). */
+    fun builtInHosts(): Set<String> = resolvers.flatMap { (it as? LinkShortXResolver)?.entryHosts.orEmpty() }.toSet()
 
     companion object {
-        fun default() = ResolverRegistry(listOf(LinkShortXResolver()))
+        fun default(domains: DomainStore = DomainStore.NONE) =
+            ResolverRegistry(listOf(LinkShortXResolver()), LinkShortXResolver.generic(), domains)
     }
 }
 
@@ -20,6 +39,7 @@ class ResolverRunner(
     private val clock: Clock = Clock.SYSTEM,
     private val sleeper: Sleeper = Sleeper.REAL,
     private val maxHops: Int = 40,
+    private val tuning: SiteTuning = SiteTuning.NONE,
 ) {
     suspend fun run(
         rawUrl: String,
@@ -34,13 +54,18 @@ class ResolverRunner(
         }
 
         val url = normalize(rawUrl) ?: return fail(ErrorKind.UNSUPPORTED_URL, "Not a valid link: $rawUrl")
-        val resolver = registry.find(url) ?: return fail(ErrorKind.UNSUPPORTED_URL, "${ErrorKind.UNSUPPORTED_URL.userMessage()} (${url.host})")
-        debug.log("resolving $url with ${resolver.name}")
+        val resolver = registry.findAny(url) ?: return fail(ErrorKind.UNSUPPORTED_URL, "${ErrorKind.UNSUPPORTED_URL.userMessage()} (${url.host})")
+        val known = registry.find(url) != null
+        debug.log("resolving $url with ${resolver.name}" + if (!known) " (unknown domain, trying anyway)" else "")
 
-        val ctx = ResolveContext(FlowHttp(client, clock, debug, maxHops), clock, sleeper, debug, onProgress)
+        val ctx = ResolveContext(FlowHttp(client, clock, debug, maxHops), clock, sleeper, debug, onProgress, tuning)
         return try {
             val final = resolver.resolve(url, ctx)
             val elapsed = clock.nowMs() - start
+            if (!known && registry.isGeneric(resolver)) {
+                registry.domains.learn(url.host)
+                debug.log("learned new shortener domain ${url.host}")
+            }
             debug.log("done in ${elapsed / 1000}s → $final")
             ResolveResult.Success(final, debug.hops, elapsed)
         } catch (e: CancellationException) {

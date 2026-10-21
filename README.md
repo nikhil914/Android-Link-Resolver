@@ -9,6 +9,23 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
+## New shortener domains, browser mode, site health (Settings tab)
+
+- **Generic resolver.** Any link you share or paste is tried with a generic AdLinkFly-style resolver, even if its
+  domain is unknown (Resolve tab → *Try this link*). It understands the "Click here to continue" pre-page, plain-form
+  step pages on unknown blog domains (it checks an unknown first redirect once before calling it the destination),
+  the arm call and Get Link. A domain that resolves is **learned**: from then on it is picked out of pasted text and
+  Telegram posts like the built-in ones. Domains can also be added or removed by hand. Captcha pages are reported, not
+  solved.
+- **Browser mode** (off by default). Makes the app a browser choice for every http(s) link. Set it as the default
+  browser: known shortlinks are resolved, every other link opens in the browser you pick, at once. This is how
+  tapped links from learned domains reach the app (the manifest can only list fixed domains).
+- **Self-tuning waits.** A rejected step adds 0.5 s to that site's step waits (up to +10 s); after 5 clean runs it
+  eases back by 0.25 s. Shown and resettable in Settings.
+- **Daily site health check.** Once a day (WorkManager, any network) the latest working link of each site is resolved
+  again in a fresh session. A site that starts failing gets a notification; its pages go into the debug bundle.
+  *Check now* runs it at once.
+
 ## Many links at once (batches)
 
 Paste one or many links on the **Resolve** tab, or several copied Telegram posts (select posts → Copy), or share

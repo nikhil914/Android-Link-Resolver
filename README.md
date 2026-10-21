@@ -9,6 +9,21 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
+## Saved collections (Saved tab)
+
+Save channel posts under a name, browse them later as text (offline), and resolve them whenever you like:
+
+- **Save whole channel** (Telegram tab → open a channel): reads the full history (up to 50,000 messages, in the
+  background with progress) and stores every post's text and all its URLs. **Update** later adds only newer posts.
+- **Save selected**: stores just the posts holding the links you ticked, with only those links, under a custom name.
+- Supported links are worked out when a collection is shown, so domains learned later are picked up in old saves.
+- In a collection: search posts, *Only with links*, select (per link, per post, Unresolved, All), **Resolve N
+  selected** → a batch named "<collection> — results". The **Results** tab lists only this collection's results
+  (latest per link) with Copy all, Share and CSV named after the collection.
+- Rename or delete a collection (deleting keeps resolved links in History).
+- Stored in the Room database (v2: tables `collections`, `collection_posts`; batches link to their collection). The
+  v1 → v2 migration keeps existing history.
+
 ## Watch channels, background mode, shortcuts
 
 - **Watch channels.** In a Telegram channel tap **Watch**. A WorkManager job (every 15 min – 6 h, default 1 h) reads

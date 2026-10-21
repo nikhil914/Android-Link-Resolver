@@ -12,6 +12,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 object Status {
@@ -29,6 +31,7 @@ object Source {
     const val TELEGRAM = "telegram"
     const val CLIPBOARD = "clipboard"
     const val WATCH = "watch"
+    const val COLLECTION = "collection"
 }
 
 @Entity(tableName = "batches")
@@ -37,6 +40,8 @@ data class BatchEntity(
     val createdAt: Long,
     val source: String,
     val label: String,
+    /** Set when the batch processed a saved collection. */
+    val collectionId: Long? = null,
 )
 
 @Entity(
@@ -208,12 +213,42 @@ abstract class ResolveDao {
 
 data class QueueCounts(val queued: Int?, val running: Int?, val done: Int?, val failed: Int?)
 
-@Database(entities = [BatchEntity::class, ResolveEntity::class, ResolveLogEntity::class], version = 1, exportSchema = false)
+@Database(
+    entities = [
+        BatchEntity::class, ResolveEntity::class, ResolveLogEntity::class, CollectionEntity::class, CollectionPostEntity::class,
+    ],
+    version = 2,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun resolves(): ResolveDao
+    abstract fun collections(): CollectionDao
 
     companion object {
+        /** v2: saved collections (whole channels / selections) and batches linked to a collection. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Statements copied from Room's generated schema so validation matches exactly.
+                db.execSQL("ALTER TABLE `batches` ADD COLUMN `collectionId` INTEGER")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `collections` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, `chatId` INTEGER NOT NULL, `chatTitle` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, `postCount` INTEGER NOT NULL, `newestMessageId` INTEGER NOT NULL, `saving` INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `collection_posts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`collectionId` INTEGER NOT NULL, `messageId` INTEGER NOT NULL, `date` INTEGER NOT NULL, `text` TEXT NOT NULL, " +
+                        "`urls` TEXT NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_collection_posts_collectionId_messageId` ON `collection_posts` (`collectionId`, `messageId`)",
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, "link-resolver.db").build()
+            Room.databaseBuilder(context, AppDatabase::class.java, "link-resolver.db")
+                .addMigrations(MIGRATION_1_2)
+                .build()
     }
 }

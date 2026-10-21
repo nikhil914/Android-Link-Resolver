@@ -122,10 +122,13 @@ class MainActivity : FragmentActivity() {
         BackHandler(enabled = openBatch != null) { openBatch = null }
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text(if (openBatch != null) "Batch" else "Link Resolver") },
-                    navigationIcon = { if (openBatch != null) TextButton(onClick = { openBatch = null }) { Text("‹ Back") } },
-                )
+                // The Saved tab draws its own compact bar (collection name + menu).
+                if (!(tab == TAB_SAVED && openBatch == null)) {
+                    TopAppBar(
+                        title = { Text(if (openBatch != null) "Batch" else "Link Resolver") },
+                        navigationIcon = { if (openBatch != null) TextButton(onClick = { openBatch = null }) { Text("‹ Back") } },
+                    )
+                }
             },
             bottomBar = {
                 NavigationBar {

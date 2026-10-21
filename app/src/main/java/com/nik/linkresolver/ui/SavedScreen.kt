@@ -22,10 +22,16 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,16 +59,18 @@ fun SavedScreen(vm: SavedViewModel, onOpenBatch: (Long) -> Unit, modifier: Modif
     if (openId == null) CollectionList(vm, modifier) else CollectionDetail(vm, onOpenBatch, modifier)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CollectionList(vm: SavedViewModel, modifier: Modifier) {
     val list by vm.collections.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
+    Column(modifier.fillMaxSize()) {
+    TopAppBar(title = { Text("Saved") }, windowInsets = WindowInsets(0))
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (list.isEmpty()) item {
             Text(
-                if (list.isEmpty()) "Nothing saved yet. In the Telegram tab, open a channel and tap Save — the whole channel, " +
-                    "or just the links you selected, under a name you choose. Saved posts can be browsed and resolved later."
-                else "${list.size} saved collection${if (list.size == 1) "" else "s"}",
+                "Nothing saved yet. In the Telegram tab, open a channel and tap Save — the whole channel, " +
+                    "or just the links you selected, under a name you choose. Saved posts can be browsed and resolved later.",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -88,46 +96,104 @@ private fun CollectionList(vm: SavedViewModel, modifier: Modifier) {
                 }
             }
         }
-    }
+    }    }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CollectionDetail(vm: SavedViewModel, onOpenBatch: (Long) -> Unit, modifier: Modifier) {
     val c by vm.open.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
+    val selected by vm.selected.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var details by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf(false) }
     BackHandler { vm.openCollection(null) }
     val col = c ?: return
 
-    Column(modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { vm.openCollection(null) }) { Text("‹ Saved") }
-                Text(col.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Text(
-                (if (col.kind == CollectionKind.CHANNEL) "Whole channel" else "Selection") + " of ${col.chatTitle} · ${col.postCount} posts · saved ${formatTime(col.createdAt)}",
-                style = MaterialTheme.typography.labelMedium,
+    Scaffold(
+        modifier = modifier,
+        contentWindowInsets = WindowInsets(0),
+        topBar = {
+            TopAppBar(
+                windowInsets = WindowInsets(0),
+                title = { Text(col.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(onClick = { vm.openCollection(null) }) { Text("‹", fontSize = 28.sp) } },
+                actions = {
+                    IconButton(onClick = { menu = true }) { Text("⋮", fontSize = 22.sp) }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Details") }, onClick = { menu = false; details = true })
+                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })
+                        if (col.kind == CollectionKind.CHANNEL) {
+                            DropdownMenuItem(text = { Text("Update with new posts") }, enabled = !col.saving, onClick = { menu = false; vm.update() })
+                        }
+                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; deleting = true })
+                    }
+                },
             )
+        },
+        floatingActionButton = {
+            if (tab == 0 && selected.isNotEmpty()) {
+                ExtendedFloatingActionButton(onClick = { confirm = true }) { Text("Resolve ${selected.size}") }
+            }
+        },
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
             if (col.saving) {
-                Text("Saving… ${progress[col.id]?.read ?: 0} messages read", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "Saving… ${progress[col.id]?.read ?: 0} messages read",
+                    Modifier.padding(horizontal = 16.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { renaming = true }) { Text("Rename") }
-                if (col.kind == CollectionKind.CHANNEL) TextButton(onClick = { vm.update() }, enabled = !col.saving) { Text("Update") }
-                TextButton(onClick = { deleting = true }) { Text("Delete") }
+            PrimaryTabRow(selectedTabIndex = tab) {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Posts") })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Results") })
             }
+            if (tab == 0) PostsTab(vm, Modifier.weight(1f)) else ResultsTab(vm, col.name, Modifier.weight(1f))
         }
-        TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Posts") })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Results") })
-        }
-        if (tab == 0) PostsTab(vm, onOpenBatch, Modifier.weight(1f)) else ResultsTab(vm, col.name, Modifier.weight(1f))
     }
 
+    if (confirm) {
+        var fresh by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Resolve ${selected.size} link${if (selected.size == 1) "" else "s"}?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Results go to “${col.name} — results”.", style = MaterialTheme.typography.bodyMedium)
+                    Row(Modifier.fillMaxWidth().clickable { fresh = !fresh }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = fresh, onCheckedChange = { fresh = it })
+                        Text("Resolve again even if already done", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { confirm = false; vm.resolveSelected(fresh, onOpenBatch) }) { Text("Resolve") } },
+            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+        )
+    }
+    if (details) {
+        AlertDialog(
+            onDismissRequest = { details = false },
+            title = { Text(col.name) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text((if (col.kind == CollectionKind.CHANNEL) "Whole channel" else "Selection") + " of ${col.chatTitle}")
+                    Text("${col.postCount} posts")
+                    Text("Saved ${formatTime(col.createdAt)}")
+                    Text("Last changed ${formatTime(col.updatedAt)}")
+                    if (col.saving) Text("Still saving: ${progress[col.id]?.read ?: 0} messages read")
+                    progress[col.id]?.error?.let { Text("Stopped: $it", color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { details = false }) { Text("Close") } },
+        )
+    }
     if (renaming) {
         NameDialog("Rename collection", col.name, onDismiss = { renaming = false }) { vm.rename(it); renaming = false }
     }
@@ -143,19 +209,18 @@ private fun CollectionDetail(vm: SavedViewModel, onOpenBatch: (Long) -> Unit, mo
 }
 
 @Composable
-private fun PostsTab(vm: SavedViewModel, onOpenBatch: (Long) -> Unit, modifier: Modifier) {
+private fun PostsTab(vm: SavedViewModel, modifier: Modifier) {
     val ctx = LocalContext.current
     val posts by vm.posts.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val known by vm.known.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val only by vm.onlyWithLinks.collectAsStateWithLifecycle()
-    var fresh by rememberSaveable { mutableStateOf(false) }
     val linkCount = remember(posts) { posts.sumOf { it.links.size } }
     val done = remember(posts, known) { posts.flatMap { it.links }.distinct().count { known[it]?.status == Status.DONE } }
 
     Column(modifier) {
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 88.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(
@@ -201,17 +266,6 @@ private fun PostsTab(vm: SavedViewModel, onOpenBatch: (Long) -> Unit, modifier: 
                             }
                         }
                     }
-                }
-            }
-        }
-        Surface(tonalElevation = 3.dp) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Resolve again even if done", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                    Switch(checked = fresh, onCheckedChange = { fresh = it })
-                }
-                Button(onClick = { vm.resolveSelected(fresh, onOpenBatch) }, enabled = selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-                    Text(if (selected.isEmpty()) "Select links to resolve" else "Resolve ${selected.size} selected")
                 }
             }
         }

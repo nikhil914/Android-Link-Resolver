@@ -39,6 +39,12 @@ enum class ErrorKind {
 
     TOO_MANY_HOPS,
     UNSUPPORTED_URL,
+
+    /** The site wants a captcha solved (not supported yet). */
+    CAPTCHA,
+
+    /** The link didn't lead to any page the generic resolver understands. */
+    NOT_A_SHORTLINK,
 }
 
 sealed class ResolveResult {
@@ -67,4 +73,6 @@ fun ErrorKind.userMessage(): String = when (this) {
     ErrorKind.GET_LINK_FAILED -> "The final \"Get Link\" step didn't return a link"
     ErrorKind.TOO_MANY_HOPS -> "Too many redirects, gave up"
     ErrorKind.UNSUPPORTED_URL -> "This link isn't from a supported site"
+    ErrorKind.CAPTCHA -> "This site asks for a captcha, which the app can't do yet"
+    ErrorKind.NOT_A_SHORTLINK -> "This doesn't look like a supported shortlink site"
 }

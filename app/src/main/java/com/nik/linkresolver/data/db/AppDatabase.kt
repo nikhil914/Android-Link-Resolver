@@ -146,6 +146,10 @@ abstract class ResolveDao {
     )
     abstract fun observeLatestFor(urls: List<String>): Flow<List<ResolveEntity>>
 
+    /** Most recent link that really resolved (not copied from history) for a site — the health check's test link. */
+    @Query("SELECT * FROM resolves WHERE status = 'DONE' AND fromCache = 0 AND site = :site ORDER BY id DESC LIMIT 1")
+    abstract suspend fun lastSuccessForSite(site: String): ResolveEntity?
+
     @Query("SELECT COUNT(*) FROM resolves WHERE status = 'QUEUED'")
     abstract suspend fun queuedCount(): Int
 

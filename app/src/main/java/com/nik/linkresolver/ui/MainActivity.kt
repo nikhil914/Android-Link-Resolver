@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nik.linkresolver.BuildConfig
 import com.nik.linkresolver.data.db.BatchSummary
 import com.nik.linkresolver.data.db.Source
+import com.nik.linkresolver.engine.ResolverRunner
 import com.nik.linkresolver.graph
 import com.nik.linkresolver.telegram.TelegramScreen
 import com.nik.linkresolver.telegram.TelegramViewModel
@@ -116,6 +117,11 @@ class MainActivity : ComponentActivity() {
                         onClick = { tab = TAB_HISTORY; openBatch = null },
                         icon = { Text("☰") }, label = { Text("History") },
                     )
+                    NavigationBarItem(
+                        selected = tab == TAB_SETTINGS && openBatch == null,
+                        onClick = { tab = TAB_SETTINGS; openBatch = null },
+                        icon = { Text("⚙") }, label = { Text("Settings") },
+                    )
                 }
             },
         ) { pad ->
@@ -125,6 +131,11 @@ class MainActivity : ComponentActivity() {
                 batch != null -> BatchScreen(vm, batch, m)
                 tab == TAB_HISTORY -> HistoryScreen(vm, m)
                 tab == TAB_TELEGRAM -> TelegramScreen(tgVm, onOpenBatch = { openBatch = it }, modifier = m)
+                tab == TAB_SETTINGS -> SettingsScreen(
+                    application.graph, linkStatus, onEnableLinks = ::openLinkSettings,
+                    onShareDebug = { application.graph.debugStore.shareIntent()?.let(::startActivity) ?: toast("No debug data yet") },
+                    modifier = m,
+                )
                 else -> HomeScreen(m)
             }
         }
@@ -136,9 +147,9 @@ class MainActivity : ComponentActivity() {
         val settings = application.graph.settings
         var text by rememberSaveable { mutableStateOf("") }
         var fresh by rememberSaveable { mutableStateOf(false) }
-        var forceMobile by remember { mutableStateOf(settings.forceMobileData) }
-        var autoOpen by remember { mutableStateOf(settings.autoOpenFinal) }
-        var concurrency by remember { mutableStateOf(settings.concurrency.toFloat()) }
+        val concurrency = remember { settings.concurrency }
+        val unknownUrl = remember(text) { ResolverRunner.extractUrl(text) }
+        val learned by application.graph.sites.domainsFlow.collectAsStateWithLifecycle()
         val batches by vm.batches.collectAsStateWithLifecycle()
         val links = remember(text) { vm.extract(text) }
 
@@ -158,9 +169,13 @@ class MainActivity : ComponentActivity() {
             )
             Text(
                 when (links.size) {
-                    0 -> if (text.isBlank()) "Supported: ${LINK_HOSTS.joinToString()}" else "No supported links found"
+                    0 -> when {
+                        text.isBlank() -> "Supported: ${(application.graph.registry.builtInHosts() + learned).sorted().joinToString()}"
+                        unknownUrl != null -> "Unknown domain — it can still be tried with the generic resolver"
+                        else -> "No supported links found"
+                    }
                     1 -> "1 link found"
-                    else -> "${links.size} links found — they'll resolve ${concurrency.toInt()} at a time"
+                    else -> "${links.size} links found — they'll resolve $concurrency at a time"
                 },
                 style = MaterialTheme.typography.labelMedium,
             )
@@ -181,6 +196,11 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }, enabled = links.isNotEmpty()) { Text(if (links.size > 1) "Resolve ${links.size}" else "Resolve") }
+                if (links.isEmpty() && unknownUrl != null) {
+                    OutlinedButton(onClick = {
+                        startActivity(Intent(this@MainActivity, ResolveActivity::class.java).putExtra(ResolveActivity.EXTRA_URL, unknownUrl))
+                    }) { Text("Try this link") }
+                }
             }
             Row(Modifier.fillMaxWidth().clickable { fresh = !fresh }, verticalAlignment = Alignment.CenterVertically) {
                 Text("Resolve again even if already in history", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -193,33 +213,6 @@ class MainActivity : ComponentActivity() {
                 batches.take(10).forEach { b -> BatchCard(b) { openBatch = b.id } }
             }
 
-            SetupCard()
-
-            // ---- settings
-            Text("Settings", style = MaterialTheme.typography.titleMedium)
-            Column {
-                Text("Parallel resolves: ${concurrency.toInt()}", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "Each link always gets its own session. More at once is faster, but all requests come from your phone's IP.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Slider(
-                    value = concurrency,
-                    onValueChange = { concurrency = it },
-                    onValueChangeFinished = { settings.concurrency = concurrency.toInt() },
-                    valueRange = 1f..6f,
-                    steps = 4,
-                )
-            }
-            SettingRow("Force mobile data", "Use mobile data even when Wi-Fi is on (some networks can't reach the site)", forceMobile) {
-                forceMobile = it
-                settings.forceMobileData = it
-            }
-            SettingRow("Open final link automatically", "Single links: skip the result screen and open the link right away", autoOpen) {
-                autoOpen = it
-                settings.autoOpenFinal = it
-            }
-            Text("v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         }
     }
 
@@ -233,51 +226,6 @@ class MainActivity : ComponentActivity() {
                     style = MaterialTheme.typography.bodySmall,
                     color = if (b.pending > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-    }
-
-    @Composable
-    private fun SetupCard() {
-        var showTip by rememberSaveable { mutableStateOf(false) }
-        val notNeeded = linkStatus.values.all { it == LinkStatus.NOT_NEEDED }
-        val ok = linkStatus.values.all { it == LinkStatus.ENABLED || it == LinkStatus.NOT_NEEDED }
-        Card(
-            Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (ok) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
-            ),
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Open links in this app", style = MaterialTheme.typography.titleMedium)
-                for ((host, st) in linkStatus) {
-                    val line = when (st) {
-                        LinkStatus.ENABLED -> "✓ $host opens in this app"
-                        LinkStatus.DISABLED -> "✗ $host opens in the browser"
-                        LinkStatus.NOT_NEEDED -> "Android will ask which app to use for $host"
-                        LinkStatus.UNKNOWN -> "? $host — status unknown"
-                    }
-                    Text(line, style = MaterialTheme.typography.bodyMedium)
-                }
-                if (!notNeeded && !ok) {
-                    Text(
-                        "Tap below, turn on “Open supported links”, then tick every domain.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!notNeeded) Button(onClick = ::openLinkSettings) { Text("Enable link opening") }
-                    TextButton(onClick = { showTip = !showTip }) { Text(if (showTip) "Hide Telegram tip" else "Telegram tip") }
-                }
-                if (showTip) {
-                    Text(
-                        "Telegram opens links in its own in-app browser, which never hands them to Android. " +
-                            "In Telegram: Settings → Chat Settings → turn off “In-App Browser”.\n\n" +
-                            "Many links at once: select several posts in Telegram → Copy, then Paste here. " +
-                            "Or Share them to Link Resolver.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
         }
     }
@@ -307,6 +255,7 @@ class MainActivity : ComponentActivity() {
         const val TAB_HOME = "home"
         const val TAB_HISTORY = "history"
         const val TAB_TELEGRAM = "telegram"
+        const val TAB_SETTINGS = "settings"
 
         fun openBatch(context: Context, batchId: Long) = Intent(context, MainActivity::class.java)
             .putExtra(EXTRA_BATCH, batchId)
@@ -332,16 +281,5 @@ fun linkOpeningStatus(ctx: Context): Map<String, LinkStatus> {
                 if (state.isLinkHandlingAllowed) LinkStatus.ENABLED else LinkStatus.DISABLED
             else -> LinkStatus.DISABLED
         }
-    }
-}
-
-@Composable
-private fun SettingRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
-        }
-        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

@@ -1,0 +1,252 @@
+package com.nik.linkresolver.ui
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.work.WorkInfo
+import com.nik.linkresolver.AppGraph
+import com.nik.linkresolver.BuildConfig
+import com.nik.linkresolver.data.SiteStore
+import com.nik.linkresolver.service.HealthCheckWorker
+
+@Composable
+fun SettingsScreen(
+    g: AppGraph,
+    linkStatus: Map<String, LinkStatus>,
+    onEnableLinks: () -> Unit,
+    onShareDebug: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val s = g.settings
+    var forceMobile by remember { mutableStateOf(s.forceMobileData) }
+    var autoOpen by remember { mutableStateOf(s.autoOpenFinal) }
+    var concurrency by remember { mutableStateOf(s.concurrency.toFloat()) }
+    var health by remember { mutableStateOf(s.healthCheck) }
+    var browserMode by remember { mutableStateOf(BrowserMode.isEnabled(ctx)) }
+    var forward by remember { mutableStateOf(s.forwardBrowser) }
+    var newDomain by rememberSaveable { mutableStateOf("") }
+    var tuned by remember { mutableStateOf(g.sites.tunedSites()) }
+    val domains by g.sites.domainsFlow.collectAsStateWithLifecycle()
+    val healthList by g.sites.health.collectAsStateWithLifecycle()
+    val checkRuns by remember { HealthCheckWorker.runningFlow(ctx) }.collectAsState(initial = emptyList())
+    val checking = checkRuns.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+    val browsers = remember { BrowserMode.browsers(ctx) }
+
+    Column(
+        modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        SetupCard(linkStatus, onEnableLinks)
+
+        // ---- domains
+        Section("Shortener domains") {
+            Text(
+                "Built in: ${g.registry.builtInHosts().sorted().joinToString()}. Any other link you share or paste is " +
+                    "tried with the generic resolver; a domain that works is added here, so batches and Telegram pick it up.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            domains.sorted().forEach { d ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(d, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    TextButton(onClick = { g.sites.removeDomain(d) }) { Text("Remove") }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = newDomain, onValueChange = { newDomain = it }, label = { Text("Add domain") },
+                    placeholder = { Text("e.g. shortx.io") }, singleLine = true, modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = { g.sites.addDomain(newDomain); newDomain = "" },
+                    enabled = SiteStore.normalizeHost(newDomain) != null,
+                ) { Text("Add") }
+            }
+        }
+
+        // ---- browser mode
+        Section("Browser mode") {
+            ToggleRow(
+                "Act as a browser",
+                "Tapped links from any domain come to this app first: shortlinks are resolved, everything else opens in your browser at once.",
+                browserMode,
+            ) {
+                browserMode = it
+                s.actAsBrowser = it
+                BrowserMode.setEnabled(ctx, it)
+            }
+            if (browserMode) {
+                var open by remember { mutableStateOf(false) }
+                val label = browsers.firstOrNull { it.packageName == forward }?.label ?: browsers.firstOrNull()?.label ?: "none found"
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Other links open in", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = { open = true }) { Text(label) }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        browsers.forEach { b ->
+                            DropdownMenuItem(text = { Text(b.label) }, onClick = { forward = b.packageName; s.forwardBrowser = b.packageName; open = false })
+                        }
+                    }
+                }
+                Text(
+                    "Then make Link Resolver your default browser (Android settings → Default apps → Browser app). " +
+                        "Domains added later work in browser mode too.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedButton(onClick = { BrowserMode.openDefaultAppsSettings(ctx) }) { Text("Open default apps") }
+            }
+        }
+
+        // ---- health
+        Section("Site health") {
+            ToggleRow("Daily check", "Once a day, re-resolve the latest working link of each site and notify if a site breaks.", health) {
+                health = it
+                s.healthCheck = it
+                HealthCheckWorker.schedule(ctx, it)
+            }
+            if (healthList.isEmpty()) {
+                Text("No checks yet. A site is checked once it has a resolved link.", style = MaterialTheme.typography.bodySmall)
+            }
+            healthList.forEach { h ->
+                Column {
+                    Text(
+                        (if (h.ok) "✓ " else "✗ ") + h.site,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (h.ok) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                    )
+                    Text("${formatTime(h.checkedAt)} · ${h.message}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { HealthCheckWorker.runNow(ctx) }, enabled = !checking) {
+                    Text(if (checking) "Checking…" else "Check now")
+                }
+                if (healthList.any { !it.ok }) OutlinedButton(onClick = onShareDebug) { Text("Share debug bundle") }
+            }
+            if (tuned.isNotEmpty()) {
+                HorizontalDivider()
+                Text("Learned extra waits", style = MaterialTheme.typography.titleSmall)
+                tuned.forEach { (site, ms) -> Text("$site: +${"%.1f".format(ms / 1000.0)} s per step", style = MaterialTheme.typography.bodyMedium) }
+                TextButton(onClick = { g.sites.resetTuning(); tuned = g.sites.tunedSites() }) { Text("Reset") }
+            }
+        }
+
+        // ---- resolving
+        Section("Resolving") {
+            Column {
+                Text("Parallel resolves: ${concurrency.toInt()}", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Each link always gets its own session. More at once is faster, but all requests come from your phone's IP.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Slider(
+                    value = concurrency, onValueChange = { concurrency = it },
+                    onValueChangeFinished = { s.concurrency = concurrency.toInt() },
+                    valueRange = 1f..6f, steps = 4,
+                )
+            }
+            ToggleRow("Force mobile data", "Use mobile data even when Wi-Fi is on (some networks can't reach the sites)", forceMobile) {
+                forceMobile = it
+                s.forceMobileData = it
+            }
+            ToggleRow("Open final link automatically", "Single links: skip the result screen and open the link right away", autoOpen) {
+                autoOpen = it
+                s.autoOpenFinal = it
+            }
+        }
+        Text("v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+    }
+}
+
+@Composable
+private fun Section(title: String, content: @Composable () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun SetupCard(linkStatus: Map<String, LinkStatus>, onEnableLinks: () -> Unit) {
+    var showTip by rememberSaveable { mutableStateOf(false) }
+    val notNeeded = linkStatus.values.all { it == LinkStatus.NOT_NEEDED }
+    val ok = linkStatus.values.all { it == LinkStatus.ENABLED || it == LinkStatus.NOT_NEEDED }
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (ok) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
+        ),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Open links in this app", style = MaterialTheme.typography.titleMedium)
+            for ((host, st) in linkStatus) {
+                val line = when (st) {
+                    LinkStatus.ENABLED -> "✓ $host opens in this app"
+                    LinkStatus.DISABLED -> "✗ $host opens in the browser"
+                    LinkStatus.NOT_NEEDED -> "Android will ask which app to use for $host"
+                    LinkStatus.UNKNOWN -> "? $host — status unknown"
+                }
+                Text(line, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (!notNeeded && !ok) {
+                Text("Tap below, turn on “Open supported links”, then tick every domain.", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!notNeeded) Button(onClick = onEnableLinks) { Text("Enable link opening") }
+                TextButton(onClick = { showTip = !showTip }) { Text(if (showTip) "Hide Telegram tip" else "Telegram tip") }
+            }
+            if (showTip) {
+                Text(
+                    "Telegram opens links in its own in-app browser, which never hands them to Android. " +
+                        "In Telegram: Settings → Chat Settings → turn off “In-App Browser”.\n\n" +
+                        "Many links at once: select several posts in Telegram → Copy, then Paste on the Resolve tab. " +
+                        "Or Share them to Link Resolver.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}

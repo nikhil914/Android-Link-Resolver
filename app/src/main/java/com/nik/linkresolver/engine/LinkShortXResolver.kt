@@ -17,8 +17,20 @@ data class LinkShortXConfig(
      * always in the flow, and new blog hosts are learned at runtime (see [LinkShortXResolver.resolve]).
      */
     val flowHosts: Set<String> = setOf("hindisink.com"),
-    /** Never treated as part of the flow, even if a rule would learn them. */
-    val destinationHosts: Set<String> = setOf("t.me", "telegram.me", "telegram.dog"),
+    /** Never treated as part of the flow, even if a rule would learn them, and never probed. */
+    val destinationHosts: Set<String> = setOf(
+        "t.me", "telegram.me", "telegram.dog", "drive.google.com", "docs.google.com", "mega.nz", "youtube.com",
+        "youtu.be", "play.google.com", "github.com", "mediafire.com", "terabox.com", "instagram.com", "whatsapp.com",
+    ),
+    /**
+     * Generic mode: handle any host (AdLinkFly-style sites). The first redirect out of the entry host may then be
+     * probed once to see whether it is a flow page (a blog step) rather than the destination.
+     */
+    val matchAnyHost: Boolean = false,
+    /** Generic mode: how many unknown redirect targets may be probed before one is taken as the destination. */
+    val maxProbes: Int = 2,
+    /** AdLinkFly's optional "Click here to continue" pre-page before the counter page. */
+    val preFormId: String = "link-view",
     /** Minimum time between receiving a step page (2+) and POSTing it. Server rejects ≤ ~8 s. */
     val stepWaitMs: Long = 9_200,
     /** Same for step 1. Was 0 (instant) until Oct 2026; the live site now enforces ~9 s on step 1 too. */
@@ -49,14 +61,18 @@ data class LinkShortXConfig(
  * LinkShortX: `linkshortx.in/<code>` → hindisink.com "Step 1..N of N" → linkshortx.in "Get Link" → destination.
  * Faithful port of linkbypass.py.
  */
-class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig()) : Resolver {
-    override val name = "LinkShortX"
+class LinkShortXResolver(
+    private val config: LinkShortXConfig = LinkShortXConfig(),
+    override val name: String = "LinkShortX",
+) : Resolver {
+    val entryHosts: Set<String> get() = config.entryHosts
 
     private val stepTitle = Regex("""Step\s+(\d+)\s+of\s+(\d+)""", RegexOption.IGNORE_CASE)
     private val counterValue = Regex("""counter_value["']?\s*:\s*["']?(\d+)""")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     override fun canHandle(url: HttpUrl): Boolean {
+        if (config.matchAnyHost) return true
         val host = url.host.lowercase()
         return config.entryHosts.any { host == it || host.endsWith(".$it") }
     }
@@ -64,8 +80,15 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
     private data class Pending(val step: Int, val action: HttpUrl, val fields: List<Pair<String, String>>, val referer: HttpUrl)
 
     override suspend fun resolve(url: HttpUrl, ctx: ResolveContext): String {
-        var stepWait = config.stepWaitMs
-        var firstStepWait = config.firstStepWaitMs
+        val site = url.host.lowercase().removePrefix("www.")
+        val tuned = ctx.tuning.extraWaitMs(site)
+        if (tuned > 0) ctx.log("site tuning: +${tuned}ms on step waits for $site")
+        var stepWait = config.stepWaitMs + tuned
+        var firstStepWait = config.firstStepWaitMs + tuned
+        var rejections = 0
+        var sawFlowPage = false
+        var probes = 0
+        var probed: HttpUrl? = null
         val follower = RedirectFollower(config.flowHosts + config.entryHosts + url.host)
         ctx.progress(ResolveEvent.Fetching(url.toString()))
         val first = ctx.http.get(url)
@@ -76,7 +99,20 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
 
         while (true) {
             val page = when (val r = res) {
-                is FollowResult.Final -> return r.url.toString()
+                is FollowResult.Final -> {
+                    // Generic mode, nothing recognised yet: the "destination" may really be an unknown blog step.
+                    // Look at it once (at most maxProbes times); if it isn't a flow page it is the destination.
+                    if (config.matchAnyHost && !sawFlowPage && probes < config.maxProbes && !isDestination(r.url)) {
+                        probes++
+                        probed = r.url
+                        ctx.log("unknown host ${r.url.host}: checking whether it is part of the flow")
+                        learn(ctx, follower, r.url.host)
+                        res = follower.follow(ctx, ctx.http.get(r.url))
+                        continue
+                    }
+                    if (rejections == 0) ctx.tuning.onCleanRun(site)
+                    return r.url.toString()
+                }
                 is FollowResult.Landed -> r.page
             }
             val parsed = page.parsed
@@ -85,9 +121,22 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
                 throw ResolveException(ErrorKind.ACCESS_DENIED, ErrorKind.ACCESS_DENIED.userMessage())
             }
 
+            // ---- AdLinkFly "Click here to continue" pre-page (optionally with a captcha)
+            val pre = parsed.form(config.preFormId)
+            if (pre != null && pre.method == "post" && parsed.form(config.getLinkFormId) == null) {
+                sawFlowPage = true
+                if (hasCaptcha(page)) throw ResolveException(ErrorKind.CAPTCHA, ErrorKind.CAPTCHA.userMessage())
+                val action = page.url.resolve(pre.action.ifEmpty { page.url.toString() }) ?: page.url
+                ctx.log("continue page: submitting #${config.preFormId}")
+                ctx.progress(ResolveEvent.StepSubmitting(1, "?"))
+                res = follower.follow(ctx, ctx.http.post(action, pre.fields, page.url), page.url)
+                continue
+            }
+
             // ---- hindisink "Step X of N" page
             val fwd = parsed.form(config.stepFormId)
             if (fwd != null && fwd.method == "post") {
+                sawFlowPage = true
                 // A step page's own host and its form target are part of the flow by definition.
                 learn(ctx, follower, page.url.host)
                 val m = stepTitle.find(parsed.title)
@@ -113,7 +162,9 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
             // ---- AdLinkFly "Get Link" page
             val goLink = parsed.form(config.getLinkFormId)
             if (goLink != null || parsed.anchors.any { config.getLinkAnchorClass in it.classes }) {
-                return getLink(ctx, page, goLink)
+                val final = getLink(ctx, page, goLink)
+                if (rejections == 0) ctx.tuning.onCleanRun(site)
+                return final
             }
 
             // ---- neither: the step we posted was rejected (too fast) → re-post the same token
@@ -122,6 +173,8 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
                 retries++
                 // Only lengthen the wait for the kind of step that was rejected.
                 if (p.step == 1) firstStepWait += config.rejectExtraWaitMs else stepWait += config.rejectExtraWaitMs
+                rejections++
+                ctx.tuning.onRejected(site)
                 ctx.log("step rejected by server (got «${parsed.title}»), retry $retries/${config.maxRetries} in ${config.retryDelayMs}ms")
                 ctx.progress(ResolveEvent.Retrying(retries, config.maxRetries, "Server rejected the step"))
                 ctx.delay(config.retryDelayMs)
@@ -129,6 +182,16 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
                 continue
             }
 
+            // Generic mode: a probed page that is no flow page is the destination itself.
+            val pr = probed
+            if (pr != null && !sawFlowPage) {
+                ctx.log("${pr.host} is not part of the flow: taking it as the destination")
+                return pr.toString()
+            }
+            if (config.matchAnyHost && !sawFlowPage) {
+                if (hasCaptcha(page)) throw ResolveException(ErrorKind.CAPTCHA, ErrorKind.CAPTCHA.userMessage())
+                throw ResolveException(ErrorKind.NOT_A_SHORTLINK, "${ErrorKind.NOT_A_SHORTLINK.userMessage()} («${parsed.title}» at ${page.url.host})")
+            }
             throw ResolveException(
                 ErrorKind.UNRECOGNISED_PAGE,
                 "Unrecognised page «${parsed.title}» at ${page.url}" +
@@ -194,6 +257,16 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
         if (formHtml != null) ctx.log("get-link form html: ${formHtml.replace(Regex("\\s+"), " ").take(2500)}")
     }
 
+    private fun isDestination(url: HttpUrl): Boolean {
+        val h = url.host.lowercase()
+        return config.destinationHosts.any { h == it || h.endsWith(".$it") }
+    }
+
+    private fun hasCaptcha(page: Page): Boolean {
+        val b = page.body
+        return listOf("class=\"g-recaptcha", "class=\"h-captcha", "class=\"cf-turnstile", "data-sitekey=").any { b.contains(it, ignoreCase = true) }
+    }
+
     private fun learn(ctx: ResolveContext, follower: RedirectFollower, host: String) {
         val h = host.lowercase()
         if (config.destinationHosts.any { h == it || h.endsWith(".$it") }) return
@@ -240,5 +313,13 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
             }
         }
         throw ResolveException(ErrorKind.GET_LINK_FAILED, "Get Link POST never returned a URL ($lastProblem)")
+    }
+
+    companion object {
+        /** AdLinkFly-style resolver for any host (unknown shortener domains). */
+        fun generic() = LinkShortXResolver(
+            LinkShortXConfig(entryHosts = emptySet(), flowHosts = setOf("hindisink.com"), matchAnyHost = true),
+            name = "AdLinkFly (generic)",
+        )
     }
 }

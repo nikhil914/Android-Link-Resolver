@@ -29,6 +29,7 @@ class ResolveContext(
     private val sleeper: Sleeper,
     val debug: DebugRecorder,
     private val onProgress: (ResolveEvent) -> Unit,
+    val tuning: SiteTuning = SiteTuning.NONE,
 ) {
     fun progress(event: ResolveEvent) = onProgress(event)
 

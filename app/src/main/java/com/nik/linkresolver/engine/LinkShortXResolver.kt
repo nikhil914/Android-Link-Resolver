@@ -143,6 +143,30 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
         if (carriesEntry) learn(ctx, follower, next.host)
     }
 
+    /** Detailed description of the Get Link page in the debug log, so a pasted log is enough to diagnose it. */
+    private fun logGetLinkPage(ctx: ResolveContext, page: Page, form: HtmlForm) {
+        val p = page.parsed
+        ctx.log("get-link form: action=${form.action} method=${form.method}")
+        ctx.log("get-link fields: " + form.fields.joinToString { (k, v) -> if (v.isEmpty()) "$k=<EMPTY>" else "$k(${v.length})" })
+        val body = page.body
+        val markers = listOf("g-recaptcha", "recaptcha", "cf-turnstile", "turnstile", "h-captcha", "hcaptcha", "captcha")
+            .filter { body.contains(it, ignoreCase = true) }
+        if (markers.isNotEmpty()) ctx.log("get-link captcha markers: ${markers.joinToString()}")
+        ctx.log("get-link page: ${body.length} bytes, ids=${p.ids.take(40).joinToString()}")
+        p.scripts.filter { it.src.isNotEmpty() }.forEach { ctx.log("script src: ${it.src}") }
+        val keywords = listOf("go-link", "links/go", "ajax", "serialize", "cookie", "counter", "get-link", "submit")
+        p.scripts.filter { it.src.isEmpty() && it.text.isNotBlank() }.forEachIndexed { i, sc ->
+            val t = sc.text.replace(Regex("\\s+"), " ").trim()
+            val hits = keywords.filter { t.contains(it, ignoreCase = true) }
+            if (hits.isNotEmpty() || t.length < 300) {
+                ctx.log("inline script #$i (${t.length} chars, ${hits.joinToString()}): ${t.take(1500)}")
+            }
+        }
+        // Inputs outside the form or added for JS (e.g. tokens) also matter.
+        val formHtml = Regex("<form[^>]*id=[\"']?${config.getLinkFormId}[\"']?[\\s\\S]*?</form>", RegexOption.IGNORE_CASE).find(body)?.value
+        if (formHtml != null) ctx.log("get-link form html: ${formHtml.replace(Regex("\\s+"), " ").take(2500)}")
+    }
+
     private fun learn(ctx: ResolveContext, follower: RedirectFollower, host: String) {
         val h = host.lowercase()
         if (config.destinationHosts.any { h == it || h.endsWith(".$it") }) return
@@ -157,6 +181,7 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
         }?.let { a -> page.url.resolve(a.href)?.let { return it.toString() } }
 
         if (form == null) throw ResolveException(ErrorKind.GET_LINK_FAILED, "Get Link page without #${config.getLinkFormId} form")
+        logGetLinkPage(ctx, page, form)
 
         val counter = counterValue.find(page.body)?.groupValues?.get(1)?.toIntOrNull() ?: config.getLinkDefaultCounterS
         ctx.log("get-link page: waiting ${counter}s")

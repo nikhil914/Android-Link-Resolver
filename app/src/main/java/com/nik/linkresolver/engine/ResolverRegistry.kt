@@ -11,13 +11,31 @@ import okhttp3.OkHttpClient
  * link the user explicitly hands over, never for links picked out of text.
  */
 class ResolverRegistry(
-    private val resolvers: List<Resolver>,
-    private val generic: Resolver? = null,
+    resolvers: List<Resolver>,
+    generic: Resolver? = null,
     val domains: DomainStore = DomainStore.NONE,
+    /** Extra shortener domains from the site rules (handled by the generic resolver). */
+    ruleDomains: Set<String> = emptySet(),
 ) {
+    @Volatile private var resolvers: List<Resolver> = resolvers
+    @Volatile private var generic: Resolver? = generic
+    @Volatile private var ruleDomains: Set<String> = ruleDomains
+
+    /** Swaps in resolvers built from new site rules; everyone holding this registry sees them at once. */
+    fun replaceWith(other: ResolverRegistry) {
+        resolvers = other.resolvers
+        generic = other.generic
+        ruleDomains = other.ruleDomains
+    }
+
+    private fun inRuleDomains(host: String): Boolean {
+        val h = host.lowercase().removePrefix("www.")
+        return ruleDomains.any { h == it || h.endsWith(".$it") }
+    }
+
     /** A resolver for a known shortener domain, or null. */
     fun find(url: HttpUrl): Resolver? =
-        resolvers.firstOrNull { it.canHandle(url) } ?: generic?.takeIf { domains.contains(url.host) }
+        resolvers.firstOrNull { it.canHandle(url) } ?: generic?.takeIf { domains.contains(url.host) || inRuleDomains(url.host) }
 
     /** Like [find], but falls back to trying the generic resolver on any host. */
     fun findAny(url: HttpUrl): Resolver? = find(url) ?: generic
@@ -25,7 +43,7 @@ class ResolverRegistry(
     fun isGeneric(r: Resolver) = r === generic
 
     /** Domains handled by the built-in resolvers (for display). */
-    fun builtInHosts(): Set<String> = resolvers.flatMap { (it as? LinkShortXResolver)?.entryHosts.orEmpty() }.toSet()
+    fun builtInHosts(): Set<String> = resolvers.flatMap { (it as? LinkShortXResolver)?.entryHosts.orEmpty() }.toSet() + ruleDomains
 
     companion object {
         fun default(domains: DomainStore = DomainStore.NONE) =

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "minAppVersion": 16,
+  "updated": "2026-10-21",
+  "sites": [
+    {
+      "name": "LinkShortX",
+      "hosts": ["linkshortx.in", "urlshortx.io"],
+      "flowHosts": ["hindisink.com"],
+      "stepWaitMs": 9200,
+      "firstStepWaitMs": 9200,
+      "rejectExtraWaitMs": 500,
+      "retryDelayMs": 1500,
+      "maxRetries": 6,
+      "stepFormId": "fwd",
+      "preFormId": "link-view",
+      "getLinkFormId": "go-link",
+      "getLinkAnchorClass": "get-link",
+      "getLinkDefaultCounterS": 5,
+      "getLinkExtraMs": 500,
+      "getLinkAttempts": 4,
+      "getLinkRetryDelayMs": 2000,
+      "armUrlPattern": "armUrl\\s*=\\s*['\"]([^'\"]+)['\"]",
+      "armFallbackPath": "/links/arm",
+      "armAttempts": 3,
+      "armRetryDelayMs": 1000
+    }
+  ],
+  "generic": {
+    "flowHosts": ["hindisink.com"],
+    "stepWaitMs": 9200,
+    "firstStepWaitMs": 9200
+  },
+  "domains": []
+}

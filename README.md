@@ -9,6 +9,20 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
+## Site rules from GitHub (no app update for small site changes)
+
+The tunables of each site (hosts, step waits, form ids, arm path, retries) live in [`rules/rules.json`](rules/rules.json).
+The app downloads it from this repo once a day (HTTPS from raw.githubusercontent.com, not signed) and on
+*Settings → Site rules → Check now*. A copy is bundled in the APK (`app/src/main/assets/rules.json`, kept identical
+by a unit test), so the app works offline and before the first download.
+
+- Bump `version` when you edit the file; the app only takes a file newer than the one in use.
+- `minAppVersion` (versionCode) keeps a file away from apps too old to understand it.
+- Every value is checked: unknown keys are ignored, missing keys keep the defaults, and a file with an
+  out-of-range wait, a bad host or id, or a broken regex is ignored as a whole (the current rules stay).
+- `domains` adds shortener domains for the generic resolver. A new *kind* of step still needs an app release.
+- *Use bundled* drops the downloaded file.
+
 ## Acting on final links, grouping, stats
 
 - **Bot links.** Under a final `t.me/<bot>?start=…` link: **Start @bot**. The app starts the bot through your
@@ -108,7 +122,7 @@ published as the `tdlib-<commit>` prerelease; the `:tdlib` module downloads it a
 
 ## Install
 
-Every push builds a **debug APK** with GitHub Actions. Every push to `main` also publishes a
+Every push builds a **release APK** (R8-shrunk, about 21 MB instead of 34 MB) with GitHub Actions. Every push to `main` also publishes a
 **GitHub Release** (tag `v<versionName>`) with the APK attached — grab it from *Releases*, or point
 [Obtainium](https://github.com/ImranR98/Obtainium) at this repo for auto-updates. Other branches: Actions → the run →
 *Artifacts*.
@@ -137,10 +151,12 @@ On a failed resolve, tap **Show debug log** (every hop: method, status, URL, pag
 The bundle is a zip with the log and the HTML of every page from the last resolve. Put real pages into
 `app/src/test/resources/fixtures/` to add parser tests.
 
-## Release builds (later)
+## Release builds and signing
 
-`app/build.gradle.kts` already supports a release key from env vars (`KEYSTORE_FILE`, `KEYSTORE_PASSWORD`,
-`KEY_ALIAS`, `KEY_PASSWORD`). CI only builds debug for now.
+The release build is shrunk with R8 (`app/proguard-rules.pro`; TDLib's JNI classes are kept). It is still signed with
+the committed debug key, so it installs over every earlier build. `app/build.gradle.kts` also supports an own release
+key from env vars (`KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`), not used yet — switching
+keys means uninstalling once.
 
 ## Project layout
 
@@ -149,6 +165,7 @@ app/src/main/java/com/nik/linkresolver/
   engine/   pure Kotlin (no Android imports), unit-tested on the JVM
     Resolver, ResolverRegistry, ResolverRunner   pluggable resolvers picked by host
     LinkShortXResolver + LinkShortXConfig       the flow; all waits/selectors in one config
+    SiteRules                                   rules.json → resolver configs (validated)
     RedirectFollower                            3xx / meta refresh / tiny JS redirects inside flow hosts
     FlowHttp, PageParser (Jsoup), DebugRecorder
   net/      OkHttp factory, binding to the cellular network
@@ -160,6 +177,6 @@ tdlib/      module: downloads the prebuilt TDLib (Java API + libtdjni.so)
   ui/       Compose screens + ViewModel (resolution survives rotation)
 ```
 
-Build locally: `./gradlew :app:lint testDebugUnitTest assembleDebug` (JDK 17+, Android SDK 37).
+Build locally: `./gradlew :app:lint testDebugUnitTest assembleRelease` (JDK 17+, Android SDK 37).
 
 The final destination is **never requested**: once a redirect leaves the flow hosts, that URL is the result.

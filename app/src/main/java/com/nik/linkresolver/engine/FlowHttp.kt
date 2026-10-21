@@ -6,6 +6,8 @@ import okhttp3.Callback
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.FormBody
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.Headers
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -94,10 +96,23 @@ class FlowHttp(
         return execute("POST", url, body, referer, headers)
     }
 
+    /** POST as multipart/form-data, like `xhr.send(new FormData(form))` in a browser. */
+    suspend fun postMultipart(
+        url: HttpUrl,
+        fields: List<Pair<String, String>>,
+        referer: HttpUrl? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): Page {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .apply { fields.forEach { (k, v) -> addFormDataPart(k, v) } }
+            .build()
+        return execute("POST", url, body, referer, headers)
+    }
+
     private suspend fun execute(
         method: String,
         url: HttpUrl,
-        body: FormBody?,
+        body: RequestBody?,
         referer: HttpUrl?,
         extra: Map<String, String>,
     ): Page {

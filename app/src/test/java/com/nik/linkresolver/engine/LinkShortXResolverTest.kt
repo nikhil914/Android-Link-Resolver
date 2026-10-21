@@ -96,7 +96,7 @@ class LinkShortXResolverTest {
         assertEquals("XMLHttpRequest", go.headers["X-Requested-With"])
         assertTrue(go.headers["Accept"]!!.startsWith("application/json"))
         assertTrue(go.headers["Cookie"]!!.contains("AppSession=s1"))
-        assertTrue(go.body.contains("ad_form_data="))
+        assertTrue(go.body.contains("f5defcd30b9fc9b89="))
     }
 
     @Test
@@ -162,9 +162,30 @@ class LinkShortXResolverTest {
         val debug = InMemoryDebugRecorder(clock)
         resolve(debug = debug)
         val log = debug.asText()
-        assertTrue(log, log.contains("get-link fields: _method(4), _csrfToken(5), ad_form_data(8)"))
+        assertTrue(log, log.contains("get-link fields: _method(4), _csrfToken(5), f5defcd30b9fc9b89(8)"))
         assertTrue(log, log.contains("inline script #0"))
         assertTrue(log, log.contains("get-link form html: <form id=\"go-link\""))
+    }
+
+    @Test
+    fun linkIsArmedBeforeGetLink() {
+        site = FakeLinkShortX(clock).start()
+        val result = resolve()
+        assertEquals(site.finalUrl, (result as ResolveResult.Success).finalUrl)
+        assertTrue(site.armed)
+        val paths = site.seen.map { it.path }
+        assertTrue(paths.indexOf("/links/arm") in 0 until paths.indexOf("/links/go"))
+        val arm = site.seen.single { it.path == "/links/arm" }
+        assertTrue(arm.headers["Content-Type"]!!.startsWith("multipart/form-data"))
+        assertEquals("XMLHttpRequest", arm.headers["X-Requested-With"])
+    }
+
+    @Test
+    fun pageWithoutArmScriptSkipsArm() {
+        site = FakeLinkShortX(clock, requireArm = false).start()
+        val result = resolve()
+        assertEquals(site.finalUrl, (result as ResolveResult.Success).finalUrl)
+        assertTrue(site.seen.none { it.path == "/links/arm" })
     }
 
     @Test

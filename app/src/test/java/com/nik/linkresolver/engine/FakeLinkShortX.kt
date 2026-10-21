@@ -38,11 +38,15 @@ class FakeLinkShortX(
     val finalUrl: String = "https://telegram.me/somechannel?start=abc123",
     val entryHost: String = "linkshortx.in",
     val blogHost: String = "hindisink.com",
+    /** Real page since Oct 2026: /links/go refuses unless /links/arm was called with the form first. */
+    private val requireArm: Boolean = true,
 ) : Dispatcher() {
     val server = MockWebServer()
     val seen: MutableList<Seen> = Collections.synchronizedList(mutableListOf())
     private val servedAt = mutableMapOf<Int, Long>()
     private var getLinkServedAt = 0L
+    var armed = false
+        private set
     var rejections = 0
         private set
 
@@ -110,9 +114,18 @@ class FakeLinkShortX(
                 html(getLinkPage())
             }
 
+            host == entryHost && path == "/links/arm" && request.method == "POST" -> {
+                val ajax = request.getHeader("X-Requested-With") == "XMLHttpRequest"
+                val multipart = request.getHeader("Content-Type")?.startsWith("multipart/form-data") == true
+                if (ajax && multipart && body.contains("csrf1") && body.contains("name=\"f5defcd30b9fc9b89\"")) armed = true
+                MockResponse().setResponseCode(200).setBody("")
+            }
+
             host == entryHost && path == "/links/go" && request.method == "POST" -> {
                 val ajax = request.getHeader("X-Requested-With") == "XMLHttpRequest"
-                if (!ajax || clock.now - getLinkServedAt < counterS * 1000L || !body.contains("_csrfToken=csrf1")) {
+                if (!ajax || clock.now - getLinkServedAt < counterS * 1000L || !body.contains("_csrfToken=csrf1") ||
+                    (requireArm && !armed)
+                ) {
                     json("""{"status":"error","message":"Bad Request.","url":""}""")
                 } else {
                     json("""{"status":"success","message":"Go without Earn because anonymous user","url":"$finalUrl"}""")
@@ -140,11 +153,14 @@ class FakeLinkShortX(
     }
 
     private fun getLinkPage() = """<!doctype html><html><head><title>LinkShortX - Get Link</title>
-        <script>var app_vars = {"base_url":"/","counter_value":"$counterS","counter_start":"DOMContentLoaded"};</script>
+        <script>var app_vars = {"base_url":"/","enable_captcha":"yes","captcha_shortlink":"no","counter_value":$counterS,"counter_start":"load"};</script>
+        ${if (requireArm) """<script>(function () { var armUrl = '/links/arm'; function arm(attempt) { var f = document.getElementById('go-link');
+          var xhr = new XMLHttpRequest(); xhr.open('POST', armUrl, true); xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+          xhr.send(new FormData(f)); } arm(0); })();</script>""" else ""}
         </head><body>
         <form id="go-link" method="post" action="/links/go" accept-charset="utf-8">
           <div style="display:none;"><input type="hidden" name="_method" value="POST"><input type="hidden" name="_csrfToken" value="csrf1"></div>
-          <input type="hidden" name="ad_form_data" value="ZGF0YQ==">
+          <input type="hidden" name="f5defcd30b9fc9b89" value="ZGF0YQ==">
           <div style="display:none;"><input type="hidden" name="_Token[fields]" value="f1"><input type="hidden" name="_Token[unlocked]" value="adcopy_challenge"></div>
         </form>
         <a href="#" class="btn btn-success btn-lg get-link disabled">Please wait...</a>

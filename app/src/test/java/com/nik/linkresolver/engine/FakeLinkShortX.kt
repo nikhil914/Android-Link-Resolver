@@ -12,12 +12,16 @@ import java.util.Collections
 import java.util.concurrent.TimeUnit
 
 /** Virtual time: sleeping just moves the clock, so 9 s waits take 0 s of real time. */
-class FakeClock(var now: Long = 1_000_000L) : Clock, Sleeper {
-    val sleeps = Collections.synchronizedList(mutableListOf<Long>())
-    override fun nowMs(): Long = now
+class FakeClock(start: Long = 1_000_000L) : Clock, Sleeper {
+    private val t = java.util.concurrent.atomic.AtomicLong(start)
+    var now: Long
+        get() = t.get()
+        set(v) = t.set(v)
+    val sleeps: MutableList<Long> = Collections.synchronizedList(mutableListOf<Long>())
+    override fun nowMs(): Long = t.get()
     override suspend fun sleep(ms: Long) {
         sleeps += ms
-        now += ms
+        t.addAndGet(ms)
     }
 }
 

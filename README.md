@@ -9,6 +9,21 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
+## Many links at once (batches)
+
+Paste one or many links on the **Resolve** tab, or several copied Telegram posts (select posts → Copy), or share
+them to Link Resolver. Every supported link is picked out (duplicates dropped) and resolved in parallel:
+
+- **Parallel resolves** setting (1–6, default 3). Each link always runs in its own session (own cookie jar), so links
+  never share state. If two links still end with the same final link, the batch screen flags it.
+- Runs in a foreground service with a progress notification, so it keeps going when you leave the app;
+  *Cancel all* in the notification.
+- Links already resolved successfully come straight from history (toggle "Resolve again even if already in history").
+- Batch screen: live per-link step progress, Copy all / Share / CSV export of final links, Retry failed, Cancel,
+  per-link log.
+- **History** tab: every resolve (batches and single links) saved in a local database (Room); search, filter by
+  status, copy all final links, export CSV.
+
 ## Install
 
 Every push builds a **debug APK** with GitHub Actions. Every push to `main` also publishes a
@@ -55,7 +70,9 @@ app/src/main/java/com/nik/linkresolver/
     RedirectFollower                            3xx / meta refresh / tiny JS redirects inside flow hosts
     FlowHttp, PageParser (Jsoup), DebugRecorder
   net/      OkHttp factory, binding to the cellular network
-  data/     settings, debug bundle store
+  engine/QueueWorker                            parallel queue (Semaphore), one session per link
+  data/     settings, debug bundle store, Room DB (data/db), BatchManager (queue in DB)
+  service/  ResolveService — foreground service that drains the queue
   ui/       Compose screens + ViewModel (resolution survives rotation)
 ```
 

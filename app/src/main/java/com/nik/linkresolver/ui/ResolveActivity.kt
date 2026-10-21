@@ -46,7 +46,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.nik.linkresolver.data.db.Source
 import com.nik.linkresolver.engine.ResolverRunner
+import com.nik.linkresolver.graph
+import kotlinx.coroutines.launch
 
 /** Opened by link taps (VIEW), Share (SEND) and the main screen. */
 class ResolveActivity : ComponentActivity() {
@@ -65,6 +69,7 @@ class ResolveActivity : ComponentActivity() {
                     state = state,
                     onCancel = vm::cancel,
                     onRetry = vm::retry,
+                    onResolveAgain = { vm.start(vm.state.value.url) },
                     onShareDebug = { vm.shareDebugIntent()?.let(::startActivity) ?: ctx.toast("No debug data yet") },
                     onClose = ::finish,
                 )
@@ -79,6 +84,19 @@ class ResolveActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND) {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+            val links = application.graph.batches.extract(text)
+            if (links.size > 1) {
+                // Several links shared at once (e.g. copied Telegram posts): resolve them as a batch.
+                lifecycleScope.launch {
+                    val id = application.graph.batches.enqueue(links, Source.SHARE, "${links.size} shared links")
+                    startActivity(MainActivity.openBatch(this@ResolveActivity, id))
+                    finish()
+                }
+                return
+            }
+        }
         val raw = when (intent.action) {
             Intent.ACTION_VIEW -> intent.dataString
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { ResolverRunner.extractUrl(it) ?: it }
@@ -89,7 +107,12 @@ class ResolveActivity : ComponentActivity() {
             finish()
             return
         }
-        vm.startIfNew(raw.trim())
+        val source = when (intent.action) {
+            Intent.ACTION_VIEW -> Source.LINK
+            Intent.ACTION_SEND -> Source.SHARE
+            else -> Source.PASTE
+        }
+        vm.startIfNew(raw.trim(), source)
     }
 
     companion object {
@@ -103,6 +126,7 @@ fun ResolveScreen(
     state: ResolveScreenState,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
+    onResolveAgain: () -> Unit,
     onShareDebug: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -134,7 +158,10 @@ fun ResolveScreen(
                                 textDecoration = TextDecoration.Underline,
                                 modifier = Modifier.clickable { ctx.openUrl(ui.finalUrl) },
                             )
-                            Text("Resolved in ${ui.elapsedMs / 1000} s", style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                if (ui.cached) "From history — resolved earlier" else "Resolved in ${ui.elapsedMs / 1000} s",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -142,6 +169,7 @@ fun ResolveScreen(
                         OutlinedButton(onClick = { ctx.copyText("Final link", ui.finalUrl) }) { Text("Copy") }
                         OutlinedButton(onClick = { ctx.shareText(ui.finalUrl) }) { Text("Share") }
                     }
+                    if (ui.cached) OutlinedButton(onClick = onResolveAgain) { Text("Resolve again") }
                 }
                 is ResolveUi.Failed -> {
                     Card(Modifier.fillMaxWidth()) {

@@ -57,8 +57,11 @@ class ResolverRunner(
         private val URL_IN_TEXT = Regex("""https?://[^\s<>"'`]+""", RegexOption.IGNORE_CASE)
 
         /** First http(s) URL found in [text] (for shared text), with trailing punctuation trimmed. */
-        fun extractUrl(text: String): String? =
-            URL_IN_TEXT.find(text)?.value?.trimEnd('.', ',', ')', ']', '}', '!', '?', ';', ':')
+        fun extractUrl(text: String): String? = extractAllUrls(text).firstOrNull()
+
+        /** Every http(s) URL in [text], in order. */
+        fun extractAllUrls(text: String): List<String> =
+            URL_IN_TEXT.findAll(text).map { it.value.trimEnd('.', ',', ')', ']', '}', '!', '?', ';', ':', '*', '_') }.toList()
 
         /** Accepts a bare "linkshortx.in/abc" too. */
         fun normalize(raw: String): HttpUrl? {

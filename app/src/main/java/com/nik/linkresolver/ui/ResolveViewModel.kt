@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.nik.linkresolver.engine.InMemoryDebugRecorder
 import com.nik.linkresolver.engine.ResolveEvent
 import com.nik.linkresolver.engine.ResolveResult
+import com.nik.linkresolver.data.db.Source
+import com.nik.linkresolver.engine.ResolverRunner
 import com.nik.linkresolver.graph
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,7 +23,7 @@ import kotlinx.coroutines.withContext
 sealed interface ResolveUi {
     data object Idle : ResolveUi
     data class Running(val headline: String, val secondsLeft: Int? = null, val step: Int? = null, val total: Int? = null) : ResolveUi
-    data class Done(val finalUrl: String, val elapsedMs: Long) : ResolveUi
+    data class Done(val finalUrl: String, val elapsedMs: Long, val cached: Boolean = false) : ResolveUi
     data class Failed(val message: String, val elapsedMs: Long) : ResolveUi
     data object Cancelled : ResolveUi
 }
@@ -47,10 +49,25 @@ class ResolveViewModel(app: Application) : AndroidViewModel(app) {
     private var job: Job? = null
 
     /** Starts resolving [url] unless it's already the one in progress/done. */
-    fun startIfNew(url: String) {
+    private var source = Source.LINK
+
+    fun startIfNew(raw: String, source: String) {
+        val url = ResolverRunner.normalize(raw)?.toString() ?: raw
         val ui = _state.value.ui
         if (url == _state.value.url && (ui is ResolveUi.Running || ui is ResolveUi.Done)) return
-        start(url)
+        this.source = source
+        job?.cancel()
+        _state.value = ResolveScreenState(url = url, ui = ResolveUi.Running("Opening link…"), network = g.networks.describe())
+        job = viewModelScope.launch {
+            // Already resolved before? Show it instantly (the user can still resolve again).
+            val cached = g.batches.lastDone(url)
+            if (cached?.finalUrl != null) {
+                _state.update { it.copy(ui = ResolveUi.Done(cached.finalUrl, cached.durationMs ?: 0, cached = true), network = "") }
+                if (g.settings.autoOpenFinal) _openRequests.trySend(cached.finalUrl)
+            } else {
+                start(url)
+            }
+        }
     }
 
     fun start(url: String) {
@@ -77,6 +94,9 @@ class ResolveViewModel(app: Application) : AndroidViewModel(app) {
 
                 val result = g.runner.run(url, client, recorder) { event -> onEvent(event) }
                 finished = result
+                withContext(NonCancellable + Dispatchers.IO) {
+                    runCatching { g.batches.recordSingle(url, source, result, recorder.asText()) }
+                }
                 _state.update {
                     it.copy(
                         ui = when (result) {

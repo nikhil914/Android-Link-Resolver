@@ -1,7 +1,9 @@
 package com.nik.linkresolver
 
 import android.app.Application
+import com.nik.linkresolver.data.BatchManager
 import com.nik.linkresolver.data.DebugStore
+import com.nik.linkresolver.data.db.AppDatabase
 import com.nik.linkresolver.data.Settings
 import com.nik.linkresolver.engine.ResolverRegistry
 import com.nik.linkresolver.engine.ResolverRunner
@@ -16,6 +18,8 @@ class AppGraph(app: Application) {
     val http = OkHttpFactory()
     val registry = ResolverRegistry.default()
     val runner = ResolverRunner(registry)
+    val db = AppDatabase.create(app)
+    val batches = BatchManager(app, db.resolves(), registry)
 }
 
 class LinkResolverApp : Application() {

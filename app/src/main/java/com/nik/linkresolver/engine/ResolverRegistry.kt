@@ -48,9 +48,10 @@ class ResolverRunner(
         onProgress: (ResolveEvent) -> Unit,
     ): ResolveResult {
         val start = clock.nowMs()
+        var http: FlowHttp? = null
         fun fail(kind: ErrorKind, message: String): ResolveResult.Failure {
             debug.log("FAILED [$kind]: $message")
-            return ResolveResult.Failure(kind, message, debug.hops, clock.nowMs() - start)
+            return ResolveResult.Failure(kind, message, debug.hops, clock.nowMs() - start, http?.bytes ?: 0)
         }
 
         val url = normalize(rawUrl) ?: return fail(ErrorKind.UNSUPPORTED_URL, "Not a valid link: $rawUrl")
@@ -58,7 +59,8 @@ class ResolverRunner(
         val known = registry.find(url) != null
         debug.log("resolving $url with ${resolver.name}" + if (!known) " (unknown domain, trying anyway)" else "")
 
-        val ctx = ResolveContext(FlowHttp(client, clock, debug, maxHops), clock, sleeper, debug, onProgress, tuning)
+        val flow = FlowHttp(client, clock, debug, maxHops).also { http = it }
+        val ctx = ResolveContext(flow, clock, sleeper, debug, onProgress, tuning)
         return try {
             val final = resolver.resolve(url, ctx)
             val elapsed = clock.nowMs() - start
@@ -67,7 +69,7 @@ class ResolverRunner(
                 debug.log("learned new shortener domain ${url.host}")
             }
             debug.log("done in ${elapsed / 1000}s → $final")
-            ResolveResult.Success(final, debug.hops, elapsed)
+            ResolveResult.Success(final, debug.hops, elapsed, flow.bytes)
         } catch (e: CancellationException) {
             debug.log("cancelled")
             throw e

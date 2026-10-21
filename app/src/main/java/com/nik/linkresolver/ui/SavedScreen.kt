@@ -276,6 +276,7 @@ private fun PostsTab(vm: SavedViewModel, modifier: Modifier) {
 private fun ResultsTab(vm: SavedViewModel, name: String, modifier: Modifier) {
     val ctx = LocalContext.current
     val rows by vm.results.collectAsStateWithLifecycle()
+    val bots by vm.bots.collectAsStateWithLifecycle()
     val done = rows.count { it.status == Status.DONE }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         item {
@@ -293,23 +294,26 @@ private fun ResultsTab(vm: SavedViewModel, name: String, modifier: Modifier) {
                 }
             }
         }
-        items(rows, key = { it.id }) { r -> ResultLine(r) }
+        items(rows, key = { it.id }) { r -> ResultLine(r, bots[r.finalUrl]) }
     }
 }
 
 @Composable
-private fun ResultLine(r: ResolveEntity) {
+private fun ResultLine(r: ResolveEntity, bot: com.nik.linkresolver.data.db.BotStartEntity?) {
     val ctx = LocalContext.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp)) {
             Text(r.sourceUrl.removePrefix("https://"), fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             when (r.status) {
-                Status.DONE -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        r.finalUrl.orEmpty(), Modifier.weight(1f).clickable { ctx.openUrl(r.finalUrl.orEmpty()) },
-                        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium,
-                    )
-                    TextButton(onClick = { ctx.copyText("Final link", r.finalUrl.orEmpty()) }) { Text("Copy") }
+                Status.DONE -> Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            r.finalUrl.orEmpty(), Modifier.weight(1f).clickable { ctx.openUrl(r.finalUrl.orEmpty()) },
+                            color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium,
+                        )
+                        TextButton(onClick = { ctx.copyText("Final link", r.finalUrl.orEmpty()) }) { Text("Copy") }
+                    }
+                    FinalLinkActions(r.finalUrl.orEmpty(), bot)
                 }
                 Status.QUEUED, Status.RUNNING -> Text("… resolving", style = MaterialTheme.typography.bodySmall)
                 else -> Text(r.error ?: r.status, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)

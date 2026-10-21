@@ -67,6 +67,8 @@ data class ResolveEntity(
     val durationMs: Long? = null,
     /** Result copied from an earlier successful resolve of the same link instead of resolving again. */
     val fromCache: Boolean = false,
+    /** Approximate bytes transferred for this resolve (null for older rows). */
+    val bytes: Long? = null,
 )
 
 /** Debug log per resolve, kept out of the list queries. */
@@ -118,9 +120,11 @@ abstract class ResolveDao {
 
     @Query(
         "UPDATE resolves SET status = :status, finalUrl = :finalUrl, error = :error, errorKind = :errorKind, " +
-            "finishedAt = :finishedAt, durationMs = :durationMs WHERE id = :id",
+            "finishedAt = :finishedAt, durationMs = :durationMs, bytes = :bytes WHERE id = :id",
     )
-    abstract suspend fun finish(id: Long, status: String, finalUrl: String?, error: String?, errorKind: String?, finishedAt: Long, durationMs: Long?)
+    abstract suspend fun finish(
+        id: Long, status: String, finalUrl: String?, error: String?, errorKind: String?, finishedAt: Long, durationMs: Long?, bytes: Long? = null,
+    )
 
     /** After a crash/kill, links left RUNNING go back to the queue. */
     @Query("UPDATE resolves SET status = 'QUEUED', startedAt = NULL WHERE status = 'RUNNING'")
@@ -167,6 +171,24 @@ abstract class ResolveDao {
     @Query("SELECT COUNT(*) FROM resolves WHERE status = 'QUEUED'")
     abstract suspend fun queuedCount(): Int
 
+    // ---- stats (real resolves only, not results copied from history)
+
+    @Query(
+        "SELECT site, COUNT(*) AS total, SUM(status = 'DONE') AS done, SUM(status = 'FAILED') AS failed, " +
+            "AVG(CASE WHEN status = 'DONE' THEN durationMs END) AS avgMs, SUM(bytes) AS bytes " +
+            "FROM resolves WHERE fromCache = 0 AND status IN ('DONE', 'FAILED') GROUP BY site ORDER BY total DESC",
+    )
+    abstract fun observeSiteStats(): Flow<List<SiteStat>>
+
+    @Query("SELECT errorKind, COUNT(*) AS n FROM resolves WHERE status = 'FAILED' GROUP BY errorKind ORDER BY n DESC")
+    abstract fun observeFailureKinds(): Flow<List<KindCount>>
+
+    @Query(
+        "SELECT date(finishedAt / 1000, 'unixepoch', 'localtime') AS day, SUM(status = 'DONE') AS done, SUM(status = 'FAILED') AS failed " +
+            "FROM resolves WHERE fromCache = 0 AND finishedAt >= :since AND status IN ('DONE', 'FAILED') GROUP BY day ORDER BY day DESC",
+    )
+    abstract fun observeDays(since: Long): Flow<List<DayCount>>
+
     @Query(
         "SELECT SUM(status = 'QUEUED') AS queued, SUM(status = 'RUNNING') AS running, " +
             "SUM(status = 'DONE' AND finishedAt >= :since) AS done, SUM(status = 'FAILED' AND finishedAt >= :since) AS failed " +
@@ -211,18 +233,24 @@ abstract class ResolveDao {
     }
 }
 
+data class SiteStat(val site: String, val total: Int, val done: Int, val failed: Int, val avgMs: Double?, val bytes: Long?)
+data class KindCount(val errorKind: String?, val n: Int)
+data class DayCount(val day: String, val done: Int, val failed: Int)
+
 data class QueueCounts(val queued: Int?, val running: Int?, val done: Int?, val failed: Int?)
 
 @Database(
     entities = [
         BatchEntity::class, ResolveEntity::class, ResolveLogEntity::class, CollectionEntity::class, CollectionPostEntity::class,
+        BotStartEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun resolves(): ResolveDao
     abstract fun collections(): CollectionDao
+    abstract fun botStarts(): BotStartDao
 
     companion object {
         /** v2: saved collections (whole channels / selections) and batches linked to a collection. */
@@ -246,9 +274,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v3: bot starts for final t.me bot links; bytes used per resolve. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `resolves` ADD COLUMN `bytes` INTEGER")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `bot_starts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `finalUrl` TEXT NOT NULL, " +
+                        "`bot` TEXT NOT NULL, `status` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `finishedAt` INTEGER, `replyText` TEXT, " +
+                        "`replyUrls` TEXT, `replyFiles` TEXT, `forwarded` INTEGER NOT NULL, `error` TEXT)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_bot_starts_finalUrl` ON `bot_starts` (`finalUrl`)")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "link-resolver.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

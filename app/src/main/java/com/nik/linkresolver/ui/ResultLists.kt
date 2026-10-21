@@ -52,6 +52,7 @@ fun ResolveRow(
     progress: String?,
     duplicateOf: Int?,
     onRetry: () -> Unit,
+    bot: com.nik.linkresolver.data.db.BotStartEntity? = null,
     onShowLog: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -90,6 +91,7 @@ fun ResolveRow(
                         if (duplicateOf != null) add("⚠ same result as #$duplicateOf")
                     }.joinToString(" · ")
                     Text(meta, style = MaterialTheme.typography.labelSmall)
+                    FinalLinkActions(url, bot)
                 }
                 else -> Text(row.error ?: row.status, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
@@ -157,6 +159,7 @@ fun BatchScreen(vm: MainViewModel, batchId: Long, modifier: Modifier = Modifier)
     val progress by vm.progress.collectAsStateWithLifecycle()
     var log by remember { mutableStateOf<String?>(null) }
     val dups = remember(rows) { duplicates(rows) }
+    val bots by vm.bots.collectAsStateWithLifecycle()
 
     val done = rows.count { it.status == Status.DONE }
     val failed = rows.count { it.status == Status.FAILED || it.status == Status.CANCELLED }
@@ -192,7 +195,7 @@ fun BatchScreen(vm: MainViewModel, batchId: Long, modifier: Modifier = Modifier)
             }
         }
         items(rows, key = { it.id }) { row ->
-            ResolveRow(row, progress[row.id], dups[row.id], onRetry = { vm.retry(row.id) }, onShowLog = { vm.loadLog(row.id) { log = it } })
+            ResolveRow(row, progress[row.id], dups[row.id], onRetry = { vm.retry(row.id) }, onShowLog = { vm.loadLog(row.id) { log = it } }, bot = bots[row.finalUrl])
         }
     }
     LogDialog(log) { log = null }
@@ -200,12 +203,30 @@ fun BatchScreen(vm: MainViewModel, batchId: Long, modifier: Modifier = Modifier)
 
 @Composable
 fun HistoryScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
+    var stats by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    if (stats) {
+        androidx.activity.compose.BackHandler { stats = false }
+        StatsScreen(vm, onClose = { stats = false }, modifier = modifier)
+        return
+    }
+    val grouped by vm.historyGrouped.collectAsStateWithLifecycle()
+    HistoryList(vm, grouped, onStats = { stats = true }, modifier = modifier)
+}
+
+@Composable
+private fun HistoryList(vm: MainViewModel, grouped: Boolean, onStats: () -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val rows by vm.history.collectAsStateWithLifecycle()
     val query by vm.historyQuery.collectAsStateWithLifecycle()
     val status by vm.historyStatus.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
+    val bots by vm.bots.collectAsStateWithLifecycle()
     var log by remember { mutableStateOf<String?>(null) }
+    val groups = remember(rows, grouped) {
+        if (!grouped) emptyList()
+        else rows.filter { it.status == Status.DONE && !it.finalUrl.isNullOrEmpty() }
+            .groupBy { it.finalUrl!! }.toList().sortedByDescending { it.second.size }
+    }
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -223,15 +244,49 @@ fun HistoryScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(onClick = { ctx.copyText("Final links", finalUrlsText(rows)) }, label = { Text("Copy final links") })
-                    AssistChip(onClick = { ctx.shareCsv(rows, "history") }, label = { Text("Export CSV") })
+                    FilterChip(selected = grouped, onClick = { vm.historyGrouped.value = !grouped }, label = { Text("By final link") })
+                    AssistChip(onClick = { ctx.copyText("Final links", finalUrlsText(rows)) }, label = { Text("Copy") })
+                    AssistChip(onClick = { ctx.shareCsv(rows, "history") }, label = { Text("CSV") })
+                    AssistChip(onClick = onStats, label = { Text("Stats") })
                 }
-                Text("${rows.size} shown", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    if (grouped) "${groups.size} final links from ${groups.sumOf { it.second.size }} shortlinks" else "${rows.size} shown",
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
         }
-        items(rows, key = { it.id }) { row ->
-            ResolveRow(row, progress[row.id], null, onRetry = { vm.retry(row.id) }, onShowLog = { vm.loadLog(row.id) { log = it } })
+        if (grouped) items(groups, key = { it.first }) { (finalUrl, members) ->
+            DestinationCard(finalUrl, members, bots[finalUrl])
+        } else items(rows, key = { it.id }) { row ->
+            ResolveRow(row, progress[row.id], null, onRetry = { vm.retry(row.id) }, onShowLog = { vm.loadLog(row.id) { log = it } }, bot = bots[row.finalUrl])
         }
     }
     LogDialog(log) { log = null }
+}
+
+
+/** One destination and every shortlink (and channel) that led to it. */
+@Composable
+private fun DestinationCard(finalUrl: String, members: List<ResolveEntity>, bot: com.nik.linkresolver.data.db.BotStartEntity?) {
+    val ctx = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    val sources = members.map { it.sourceUrl }.distinct()
+    val channels = members.mapNotNull { it.channel }.distinct()
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(finalUrl, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { ctx.openUrl(finalUrl) })
+            Text(
+                "${sources.size} shortlink${if (sources.size == 1) "" else "s"}" + if (channels.isNotEmpty()) " · from ${channels.joinToString()}" else "",
+                style = MaterialTheme.typography.labelSmall,
+            )
+            if (expanded) sources.forEach {
+                Text(it.removePrefix("https://"), fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Row {
+                TextButton(onClick = { ctx.copyText("Final link", finalUrl) }) { Text("Copy") }
+                if (sources.size > 1 || !expanded) TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide shortlinks" else "Show shortlinks") }
+            }
+            FinalLinkActions(finalUrl, bot)
+        }
+    }
 }

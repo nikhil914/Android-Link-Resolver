@@ -9,6 +9,20 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
+## Acting on final links, grouping, stats
+
+- **Bot links.** Under a final `t.me/<bot>?start=…` link: **Start @bot**. The app starts the bot through your
+  Telegram login, waits up to 45 s for its replies and saves them (files with name and size, links, text); **Open
+  chat** goes to the bot in Telegram. Starts are queued and paced (one every 10 s, Telegram flood limits waited out).
+  Settings → Bot links: start every new bot link automatically (opt-in) and forward the replies to your Saved Messages.
+  This is the only feature that sends anything from your account.
+- **Invite links.** Under a `t.me/+…` link: **Preview & join** shows the title, type, members and description, and
+  joins (or sends a join request) only when you tap.
+- **History → By final link** groups shortlinks that led to the same destination, with the channels they came from.
+- **History → Stats**: success rate, average time and data used per site, failures by reason, last 14 days.
+  Data used is counted per resolve from v0.1.15.
+- Database v3 (`bot_starts`, `resolves.bytes`); migrations v1 → v2 → v3 keep existing data.
+
 ## Saved collections (Saved tab)
 
 Save channel posts under a name, browse them later as text (offline), and resolve them whenever you like:

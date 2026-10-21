@@ -30,6 +30,9 @@ class BatchManager(
     /** Live status text for running links, by resolve id. */
     val progress: StateFlow<Map<Long, String>> = _progress
 
+    /** Called with every newly resolved final link (e.g. to start bot links automatically). */
+    @Volatile var onResolved: ((String) -> Unit)? = null
+
     /** Set by [ResolveService] while it drains the queue. */
     @Volatile var worker: QueueWorker? = null
 
@@ -82,16 +85,17 @@ class BatchManager(
                 is ResolveResult.Success -> ResolveEntity(
                     batchId = null, sourceUrl = url, finalUrl = result.finalUrl, status = Status.DONE, site = siteOf(url),
                     source = source, createdAt = now - result.elapsedMs, startedAt = now - result.elapsedMs,
-                    finishedAt = now, durationMs = result.elapsedMs,
+                    finishedAt = now, durationMs = result.elapsedMs, bytes = result.bytes,
                 )
                 is ResolveResult.Failure -> ResolveEntity(
                     batchId = null, sourceUrl = url, status = Status.FAILED, error = result.message, errorKind = result.kind.name,
                     site = siteOf(url), source = source, createdAt = now - result.elapsedMs, startedAt = now - result.elapsedMs,
-                    finishedAt = now, durationMs = result.elapsedMs,
+                    finishedAt = now, durationMs = result.elapsedMs, bytes = result.bytes,
                 )
             },
         )
         dao.putLog(ResolveLogEntity(id, log.takeLast(MAX_LOG)))
+        if (result is ResolveResult.Success) onResolved?.invoke(result.finalUrl)
     }
 
     suspend fun lastDone(url: String) = dao.lastDone(url)
@@ -136,8 +140,11 @@ class BatchManager(
     override suspend fun finish(id: Long, result: ResolveResult, log: String) {
         val now = System.currentTimeMillis()
         when (result) {
-            is ResolveResult.Success -> dao.finish(id, Status.DONE, result.finalUrl, null, null, now, result.elapsedMs)
-            is ResolveResult.Failure -> dao.finish(id, Status.FAILED, null, result.message, result.kind.name, now, result.elapsedMs)
+            is ResolveResult.Success -> {
+                dao.finish(id, Status.DONE, result.finalUrl, null, null, now, result.elapsedMs, result.bytes)
+                onResolved?.invoke(result.finalUrl)
+            }
+            is ResolveResult.Failure -> dao.finish(id, Status.FAILED, null, result.message, result.kind.name, now, result.elapsedMs, result.bytes)
         }
         dao.putLog(ResolveLogEntity(id, log.takeLast(MAX_LOG)))
         clearProgress(id)

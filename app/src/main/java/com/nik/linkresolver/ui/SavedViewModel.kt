@@ -28,6 +28,11 @@ data class SavedPost(val post: CollectionPostEntity, val links: List<String>)
 @OptIn(ExperimentalCoroutinesApi::class)
 class SavedViewModel(app: Application) : AndroidViewModel(app) {
     private val g = app.graph
+
+    /** Latest bot start per final link (for bot replies under results). */
+    val bots: StateFlow<Map<String, com.nik.linkresolver.data.db.BotStartEntity>> = g.db.botStarts().observeLatest()
+        .map { l -> l.associateBy { it.finalUrl } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
     private val dao = g.db.collections()
 
     val collections: StateFlow<List<CollectionSummary>> =

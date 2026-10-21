@@ -12,4 +12,9 @@ class TelegramUriTest {
     @Test fun joinchat() = assertEquals("tg://join?invite=XyZ", TelegramUri.toApp("https://t.me/joinchat/XyZ"))
     @Test fun notTelegram() = assertNull(TelegramUri.toApp("https://example.com/x"))
     @Test fun privatePostLeftAlone() = assertNull(TelegramUri.toApp("https://t.me/c/123/45"))
+
+    @Test fun botStartParsed() = assertEquals("FileBot" to "abc_123", TelegramUri.botStart("https://telegram.me/FileBot?start=abc_123"))
+    @Test fun channelIsNotBotStart() = assertNull(TelegramUri.botStart("https://t.me/somechannel"))
+    @Test fun inviteDetected() = org.junit.Assert.assertTrue(TelegramUri.isInvite("https://t.me/+AbC") && TelegramUri.isInvite("https://t.me/joinchat/x"))
+    @Test fun channelIsNotInvite() = org.junit.Assert.assertFalse(TelegramUri.isInvite("https://t.me/somechannel"))
 }

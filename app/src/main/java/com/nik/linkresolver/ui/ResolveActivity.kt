@@ -33,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -205,6 +206,9 @@ fun ResolveScreen(
                         OutlinedButton(onClick = { ctx.shareText(ui.finalUrl) }) { Text("Share") }
                     }
                     if (ui.cached) OutlinedButton(onClick = onResolveAgain) { Text("Resolve again") }
+                    val g = (ctx.applicationContext as android.app.Application).graph
+                    val bot by remember(ui.finalUrl) { g.db.botStarts().observeLatest() }.collectAsState(initial = emptyList())
+                    FinalLinkActions(ui.finalUrl, bot.firstOrNull { it.finalUrl == ui.finalUrl })
                 }
                 is ResolveUi.Failed -> {
                     Card(Modifier.fillMaxWidth()) {

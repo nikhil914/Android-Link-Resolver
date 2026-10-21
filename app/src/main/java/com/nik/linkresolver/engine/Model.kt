@@ -48,8 +48,8 @@ enum class ErrorKind {
 }
 
 sealed class ResolveResult {
-    data class Success(val finalUrl: String, val hops: List<Hop>, val elapsedMs: Long) : ResolveResult()
-    data class Failure(val kind: ErrorKind, val message: String, val hops: List<Hop>, val elapsedMs: Long) : ResolveResult()
+    data class Success(val finalUrl: String, val hops: List<Hop>, val elapsedMs: Long, val bytes: Long = 0) : ResolveResult()
+    data class Failure(val kind: ErrorKind, val message: String, val hops: List<Hop>, val elapsedMs: Long, val bytes: Long = 0) : ResolveResult()
 }
 
 /** Thrown inside resolvers; [ResolverRunner] turns it into a [ResolveResult.Failure]. */

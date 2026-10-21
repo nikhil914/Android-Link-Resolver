@@ -34,6 +34,14 @@ data class LinkShortXConfig(
     val getLinkExtraMs: Long = 500,
     val getLinkAttempts: Int = 4,
     val getLinkRetryDelayMs: Long = 2_000,
+    /**
+     * Since Oct 2026 the Get Link page "arms" the link on load: it POSTs the #go-link form (multipart) to
+     * `/links/arm` before the counter runs, and /links/go answers "Bad Request." without it.
+     */
+    val armUrlPattern: Regex = Regex("""armUrl\s*=\s*['"]([^'"]+)['"]"""),
+    val armFallbackPath: String = "/links/arm",
+    val armAttempts: Int = 3,
+    val armRetryDelayMs: Long = 1_000,
     val maxHops: Int = 40,
 )
 
@@ -143,6 +151,25 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
         if (carriesEntry) learn(ctx, follower, next.host)
     }
 
+    /** Replays the page's on-load "arm" XHR (`xhr.send(new FormData(#go-link))` to /links/arm), if it has one. */
+    private suspend fun arm(ctx: ResolveContext, page: Page, form: HtmlForm) {
+        val inline = page.parsed.scripts.filter { it.src.isEmpty() }.joinToString("\n") { it.text }
+        val path = config.armUrlPattern.find(inline)?.groupValues?.get(1)
+            ?: config.armFallbackPath.takeIf { inline.contains(it) }
+            ?: return
+        val url = page.url.resolve(path) ?: return
+        ctx.log("arming link: POST $url")
+        repeat(config.armAttempts) { attempt ->
+            val resp = ctx.http.postMultipart(url, form.fields, page.url, mapOf("X-Requested-With" to "XMLHttpRequest", "Accept" to "*/*"))
+            if (resp.code == 200) {
+                if (resp.body.isNotBlank()) ctx.log("arm response: ${resp.body.take(300)}")
+                return
+            }
+            ctx.log("arm got HTTP ${resp.code}, attempt ${attempt + 1}/${config.armAttempts}")
+            if (attempt < config.armAttempts - 1) ctx.delay(config.armRetryDelayMs)
+        }
+    }
+
     /** Detailed description of the Get Link page in the debug log, so a pasted log is enough to diagnose it. */
     private fun logGetLinkPage(ctx: ResolveContext, page: Page, form: HtmlForm) {
         val p = page.parsed
@@ -182,6 +209,7 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
 
         if (form == null) throw ResolveException(ErrorKind.GET_LINK_FAILED, "Get Link page without #${config.getLinkFormId} form")
         logGetLinkPage(ctx, page, form)
+        arm(ctx, page, form)
 
         val counter = counterValue.find(page.body)?.groupValues?.get(1)?.toIntOrNull() ?: config.getLinkDefaultCounterS
         ctx.log("get-link page: waiting ${counter}s")

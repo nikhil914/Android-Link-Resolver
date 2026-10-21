@@ -58,7 +58,19 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_WATCH_AUTO, true)
         set(v) = prefs.edit { putBoolean(KEY_WATCH_AUTO, v) }
 
+    /** Final bot links (t.me/<bot>?start=…) are started automatically through the Telegram login. */
+    var autoBotStart: Boolean
+        get() = prefs.getBoolean(KEY_BOT_AUTO, false)
+        set(v) = prefs.edit { putBoolean(KEY_BOT_AUTO, v) }
+
+    /** Bot replies are forwarded to your Saved Messages. */
+    var forwardBotReplies: Boolean
+        get() = prefs.getBoolean(KEY_BOT_FORWARD, false)
+        set(v) = prefs.edit { putBoolean(KEY_BOT_FORWARD, v) }
+
     private companion object {
+        const val KEY_BOT_AUTO = "bot_auto"
+        const val KEY_BOT_FORWARD = "bot_forward"
         const val KEY_TG_DIRECT = "tg_direct"
         const val KEY_BACKGROUND = "background_mode"
         const val KEY_LOCK = "app_lock"

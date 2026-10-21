@@ -16,12 +16,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val g = app.graph
+
+    /** Latest bot start per final link (for bot replies under results). */
+    val bots: StateFlow<Map<String, com.nik.linkresolver.data.db.BotStartEntity>> = g.db.botStarts().observeLatest()
+        .map { l -> l.associateBy { it.finalUrl } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
     private val dao = g.db.resolves()
 
     val batches: StateFlow<List<BatchSummary>> =
@@ -36,6 +42,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         combine(historyQuery.debounce(250), historyStatus) { q, s -> q.trim() to s }
             .flatMapLatest { (q, s) -> dao.observeHistory(q, s) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val siteStats = dao.observeSiteStats().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val failureKinds = dao.observeFailureKinds().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val days = dao.observeDays(System.currentTimeMillis() - 14 * 86_400_000L)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val historyGrouped = MutableStateFlow(false)
 
     fun batchRows(batchId: Long): Flow<List<ResolveEntity>> = dao.observeBatch(batchId)
     fun batchInfo(batchId: Long): Flow<BatchEntity?> = dao.observeBatchInfo(batchId)

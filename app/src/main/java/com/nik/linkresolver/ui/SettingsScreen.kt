@@ -101,6 +101,26 @@ fun SettingsScreen(
             }
         }
 
+        // ---- bot links
+        var botAuto by remember { mutableStateOf(s.autoBotStart) }
+        var botForward by remember { mutableStateOf(s.forwardBotReplies) }
+        Section("Bot links") {
+            Text(
+                "When a final link is a bot start link (t.me/<bot>?start=…), the app can start the bot through your Telegram " +
+                    "login and save what it replies (files, links, text). This sends a /start message from your account, " +
+                    "paced at one bot every ${com.nik.linkresolver.telegram.BotStarter.MIN_GAP_MS / 1000} s. Without the switch, tap Start under a result.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            ToggleRow("Start bot links automatically", "Every newly resolved bot link is started on its own.", botAuto) {
+                botAuto = it
+                s.autoBotStart = it
+            }
+            ToggleRow("Forward bot replies to Saved Messages", "Keeps every file the bots send in one place in Telegram.", botForward) {
+                botForward = it
+                s.forwardBotReplies = it
+            }
+        }
+
         // ---- channel watch
         val tgPrefs = g.telegram.prefs
         var watched by remember { mutableStateOf(tgPrefs.watched()) }

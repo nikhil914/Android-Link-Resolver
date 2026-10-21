@@ -7,6 +7,24 @@ object TelegramUri {
     private val HOSTS = setOf("t.me", "telegram.me", "telegram.dog", "www.t.me", "www.telegram.me")
     private val NAME = Regex("^[A-Za-z][A-Za-z0-9_]{3,}$")
 
+    /** `t.me/<bot>?start=<param>` → (bot, param), else null. */
+    fun botStart(url: String): Pair<String, String>? {
+        val u = url.toHttpUrlOrNull() ?: return null
+        if (u.host.lowercase() !in HOSTS) return null
+        val seg = u.pathSegments.filter { it.isNotEmpty() }
+        val param = u.queryParameter("start") ?: return null
+        val name = seg.singleOrNull() ?: return null
+        return if (NAME.matches(name)) name to param else null
+    }
+
+    /** True for invite links (`t.me/+hash`, `t.me/joinchat/hash`). */
+    fun isInvite(url: String): Boolean {
+        val u = url.toHttpUrlOrNull() ?: return false
+        if (u.host.lowercase() !in HOSTS) return false
+        val seg = u.pathSegments.filter { it.isNotEmpty() }
+        return seg.firstOrNull()?.startsWith("+") == true || (seg.firstOrNull() == "joinchat" && seg.size > 1)
+    }
+
     fun toApp(url: String): String? {
         val u = url.toHttpUrlOrNull() ?: return null
         if (u.host.lowercase() !in HOSTS) return null

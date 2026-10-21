@@ -83,6 +83,10 @@ class FlowHttp(
     var hops = 0
         private set
 
+    /** Approximate bytes moved: bodies plus headers, both directions. */
+    var bytes = 0L
+        private set
+
     suspend fun get(url: HttpUrl, referer: HttpUrl? = null, headers: Map<String, String> = emptyMap()): Page =
         execute("GET", url, null, referer, headers)
 
@@ -139,6 +143,7 @@ class FlowHttp(
             debug.log("$method $url failed: ${e.javaClass.simpleName}: ${e.message}")
             throw mapIoError(e)
         }
+        bytes += (body?.contentLength()?.coerceAtLeast(0) ?: 0) + page.body.toByteArray().size + page.headers.byteCount() + 400
         val title = if (page.isRedirect) "→ ${page.headers["Location"]}" else page.parsed.title
         debug.hop(Hop(method, url.toString(), page.code, title, page.receivedAtMs - started))
         if (page.body.isNotEmpty()) debug.page(method, url.toString(), page.code, page.body)

@@ -47,13 +47,14 @@ class LinkShortXResolverTest {
         assertEquals(site.finalUrl, result.finalUrl)
         assertEquals(0, site.rejections)
 
-        // Waited the server timer for steps 2 and 3, plus the get-link counter.
+        // Waited the server timer for every step, plus the get-link counter.
+        assertTrue(events.any { it is ResolveEvent.StepWaiting && it.step == 1 && it.total == "3" })
         assertTrue(events.any { it is ResolveEvent.StepWaiting && it.step == 2 && it.total == "3" })
         assertTrue(events.any { it is ResolveEvent.StepWaiting && it.step == 3 })
         assertTrue(events.any { it is ResolveEvent.GetLinkWaiting })
         assertTrue(events.contains(ResolveEvent.Finalizing))
-        // ~9.2 + 9.2 + 5.5 s of virtual time
-        assertTrue("elapsed ${result.elapsedMs}", result.elapsedMs in 23_000..25_000)
+        // ~3 × 9.2 + 5.5 s of virtual time
+        assertTrue("elapsed ${result.elapsedMs}", result.elapsedMs in 32_000..34_000)
     }
 
     @Test
@@ -102,7 +103,7 @@ class LinkShortXResolverTest {
     fun rejectedStepIsRepostedWithSameToken() {
         site = FakeLinkShortX(clock, steps = 3).start()
         // Wait too short on purpose (8 s < 9 s server minimum): the server rejects, we retry after 1.5 s.
-        val result = resolve(LinkShortXConfig(stepWaitMs = 8_000))
+        val result = resolve(LinkShortXConfig(stepWaitMs = 8_000, firstStepWaitMs = 9_200))
 
         assertTrue("expected success, got $result", result is ResolveResult.Success)
         assertEquals(site.finalUrl, (result as ResolveResult.Success).finalUrl)
@@ -111,6 +112,23 @@ class LinkShortXResolverTest {
         val tokens = site.seen.filter { it.path == "/go" }.map { Regex("token=t(\\d)").find(it.body)!!.groupValues[1] }
         assertEquals(listOf("1", "2", "2", "3", "3"), tokens)
         assertTrue(clock.sleeps.contains(1_500L))
+    }
+
+    @Test
+    fun instantStepOneIsRejectedThenRetried() {
+        // Old behaviour (post step 1 at once) against the current site: rejected until ~9 s, then accepted.
+        site = FakeLinkShortX(clock, steps = 2).start()
+        val result = resolve(LinkShortXConfig(firstStepWaitMs = 0))
+        assertEquals(site.finalUrl, (result as ResolveResult.Success).finalUrl)
+        assertEquals(6, site.rejections) // 0, 1.5, 3, 4.5, 6, 7.5 s rejected; 9 s accepted
+    }
+
+    @Test
+    fun noRejectionsWithDefaultWaits() {
+        site = FakeLinkShortX(clock, steps = 4).start()
+        val result = resolve()
+        assertTrue(result is ResolveResult.Success)
+        assertEquals(0, site.rejections)
     }
 
     @Test

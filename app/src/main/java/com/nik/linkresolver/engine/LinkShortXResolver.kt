@@ -16,6 +16,8 @@ data class LinkShortXConfig(
     val flowHosts: Set<String> = setOf("linkshortx.in", "hindisink.com"),
     /** Minimum time between receiving a step page (2+) and POSTing it. Server rejects ≤ ~8 s. */
     val stepWaitMs: Long = 9_200,
+    /** Same for step 1. Was 0 (instant) until Oct 2026; the live site now enforces ~9 s on step 1 too. */
+    val firstStepWaitMs: Long = 9_200,
     /** Added to [stepWaitMs] for later steps each time a step is rejected. */
     val rejectExtraWaitMs: Long = 500,
     val retryDelayMs: Long = 1_500,
@@ -47,10 +49,11 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
         return config.entryHosts.any { host == it || host.endsWith(".$it") }
     }
 
-    private data class Pending(val action: HttpUrl, val fields: List<Pair<String, String>>, val referer: HttpUrl)
+    private data class Pending(val step: Int, val action: HttpUrl, val fields: List<Pair<String, String>>, val referer: HttpUrl)
 
     override suspend fun resolve(url: HttpUrl, ctx: ResolveContext): String {
         var stepWait = config.stepWaitMs
+        var firstStepWait = config.firstStepWaitMs
         ctx.progress(ResolveEvent.Fetching(url.toString()))
         var res = follower.follow(ctx, ctx.http.get(url))
         var pending: Pending? = null
@@ -74,15 +77,16 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
                 val step = m?.groupValues?.get(1)?.toInt() ?: 99
                 val total = m?.groupValues?.get(2) ?: "?"
                 val action = page.url.resolve(fwd.action.ifEmpty { page.url.toString() }) ?: page.url
-                if (step != 1) {
-                    val left = stepWait - (ctx.clock.nowMs() - page.receivedAtMs)
+                val wait = if (step == 1) firstStepWait else stepWait
+                if (wait > 0) {
+                    val left = wait - (ctx.clock.nowMs() - page.receivedAtMs)
                     ctx.log("step $step/$total: waiting ${"%.1f".format(maxOf(left, 0) / 1000.0)}s (server-side timer)")
                     ctx.countdown(left) { ResolveEvent.StepWaiting(step, total, it) }
                 } else {
-                    ctx.log("step 1/$total: submitting")
+                    ctx.log("step $step/$total: submitting")
                 }
                 ctx.progress(ResolveEvent.StepSubmitting(step, total))
-                pending = Pending(action, fwd.fields, page.url)
+                pending = Pending(step, action, fwd.fields, page.url)
                 retries = 0
                 res = follower.follow(ctx, ctx.http.post(action, fwd.fields, page.url), page.url)
                 continue
@@ -98,7 +102,8 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
             val p = pending
             if (p != null && retries < config.maxRetries) {
                 retries++
-                stepWait += config.rejectExtraWaitMs
+                // Only lengthen the wait for the kind of step that was rejected.
+                if (p.step == 1) firstStepWait += config.rejectExtraWaitMs else stepWait += config.rejectExtraWaitMs
                 ctx.log("step rejected by server (got «${parsed.title}»), retry $retries/${config.maxRetries} in ${config.retryDelayMs}ms")
                 ctx.progress(ResolveEvent.Retrying(retries, config.maxRetries, "Server rejected the step"))
                 ctx.delay(config.retryDelayMs)

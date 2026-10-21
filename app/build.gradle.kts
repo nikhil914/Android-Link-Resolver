@@ -1,11 +1,14 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
-// CI passes these; local builds get sensible defaults.
-val ciVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-val ciVersionName = System.getenv("VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "0.1.0-local"
+// Build number lives in version.properties and is bumped with every commit.
+val versionProps = Properties().apply { rootProject.file("version.properties").inputStream().use { load(it) } }
+val ciVersionCode = versionProps.getProperty("versionCode").trim().toInt()
+val ciVersionName = versionProps.getProperty("versionName").trim()
 
 // Release signing comes from env vars (decoded from GitHub secrets in CI).
 // If any is missing, the release build falls back to the debug key so the build never fails for that reason.

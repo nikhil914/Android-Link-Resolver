@@ -12,9 +12,11 @@ It usually takes 20–40 s, because the site enforces a real wait of about 9 s o
 ## Install
 
 Every push builds a **debug APK** with GitHub Actions. Every push to `main` also publishes a
-**GitHub Release** (tag `v0.1.<run>`) with the APK attached — grab it from *Releases*, or point
+**GitHub Release** (tag `v<versionName>`) with the APK attached — grab it from *Releases*, or point
 [Obtainium](https://github.com/ImranR98/Obtainium) at this repo for auto-updates. Other branches: Actions → the run →
 *Artifacts*.
+
+The version lives in `version.properties` and is bumped with every commit (versionCode +1, versionName patch +1).
 
 All builds are signed with the same debug key (`debug.keystore`, committed on purpose), so a new build installs as an
 update over the old one.

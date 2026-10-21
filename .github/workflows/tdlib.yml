@@ -1,0 +1,86 @@
+name: Build TDLib
+
+# One-time / on-update build of Telegram's TDLib for Android (arm64-v8a, Java interface).
+# Runs when tdlib/VERSION (a TDLib commit hash) changes, and publishes a "tdlib-<short>" release with tdlib.zip.
+# The app build downloads that zip; it never rebuilds TDLib itself.
+
+on:
+  push:
+    paths:
+      - tdlib/VERSION
+      - .github/workflows/tdlib.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read TDLib version
+        run: |
+          COMMIT=$(tr -d '[:space:]' < tdlib/VERSION)
+          echo "TD_COMMIT=$COMMIT" >> "$GITHUB_ENV"
+          echo "TD_TAG=tdlib-${COMMIT::7}" >> "$GITHUB_ENV"
+
+      - name: Skip if already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TD_TAG" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-java@v5
+        if: steps.check.outputs.exists == 'false'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install tools
+        if: steps.check.outputs.exists == 'false'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gperf php-cli perl make unzip
+
+      - name: Fetch TDLib source
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          git init td && cd td
+          git remote add origin https://github.com/tdlib/td.git
+          git fetch --depth 1 origin "$TD_COMMIT"
+          git checkout FETCH_HEAD
+
+      - name: Android SDK + NDK
+        if: steps.check.outputs.exists == 'false'
+        working-directory: td/example/android
+        run: ./fetch-sdk.sh
+
+      - name: OpenSSL
+        if: steps.check.outputs.exists == 'false'
+        working-directory: td/example/android
+        run: ./build-openssl.sh SDK '' '' '' '' 2>&1 | tail -20
+
+      - name: TDLib (arm64-v8a, API 26)
+        if: steps.check.outputs.exists == 'false'
+        working-directory: td/example/android
+        run: ./build-tdlib.sh SDK '' '' c++_static Java 26 "arm64-v8a" 2>&1 | grep -vE "^\[[0-9]+/[0-9]+\]" | tail -40
+
+      - name: Package
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          ls -la td/example/android/tdlib td/example/android/tdlib/libs/*
+          cp td/example/android/tdlib/tdlib.zip tdlib.zip
+
+      - name: Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TD_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: TDLib ${{ env.TD_TAG }} (Android arm64)
+          body: "Prebuilt TDLib (commit ${{ env.TD_COMMIT }}) for the app build. Not an app release."
+          files: tdlib.zip
+          make_latest: false
+          prerelease: true

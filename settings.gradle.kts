@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Android-Link-Resolver"
 include(":app")
+include(":tdlib")

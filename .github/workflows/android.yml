@@ -36,7 +36,7 @@ jobs:
           echo "Version: $VN (code $VC)"
 
       - name: Lint, test, build
-        run: ./gradlew lint testDebugUnitTest assembleDebug
+        run: ./gradlew :app:lint testDebugUnitTest assembleDebug
 
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk "link-resolver-${VERSION_NAME}.apk"

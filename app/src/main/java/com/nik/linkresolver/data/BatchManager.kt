@@ -39,7 +39,14 @@ class BatchManager(
      * Adds [urls] as a new batch and starts the service. Links already resolved successfully are copied from
      * history unless [fresh] is true. Returns the batch id.
      */
-    suspend fun enqueue(urls: List<String>, source: String, label: String, fresh: Boolean = false, channel: String? = null): Long {
+    suspend fun enqueue(
+        urls: List<String>,
+        source: String,
+        label: String,
+        fresh: Boolean = false,
+        channel: String? = null,
+        messageIds: Map<String, Long> = emptyMap(),
+    ): Long {
         val now = System.currentTimeMillis()
         val batchId = dao.insertBatch(BatchEntity(createdAt = now, source = source, label = label))
         val rows = urls.distinct().map { url ->
@@ -52,6 +59,7 @@ class BatchManager(
                 site = siteOf(url),
                 source = source,
                 channel = channel,
+                messageId = messageIds[url],
                 createdAt = now,
                 finishedAt = if (cached != null) now else null,
                 durationMs = if (cached != null) 0 else null,

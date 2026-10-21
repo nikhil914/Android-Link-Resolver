@@ -140,6 +140,12 @@ abstract class ResolveDao {
     @Query("SELECT * FROM resolves WHERE sourceUrl = :url AND status = 'DONE' ORDER BY id DESC LIMIT 1")
     abstract suspend fun lastDone(url: String): ResolveEntity?
 
+    /** Latest row per source URL among [urls] (any status), for "already resolved" badges. */
+    @Query(
+        "SELECT * FROM resolves WHERE id IN (SELECT MAX(id) FROM resolves WHERE sourceUrl IN (:urls) GROUP BY sourceUrl)",
+    )
+    abstract fun observeLatestFor(urls: List<String>): Flow<List<ResolveEntity>>
+
     @Query("SELECT COUNT(*) FROM resolves WHERE status = 'QUEUED'")
     abstract suspend fun queuedCount(): Int
 

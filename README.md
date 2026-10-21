@@ -24,6 +24,26 @@ them to Link Resolver. Every supported link is picked out (duplicates dropped) a
 - **History** tab: every resolve (batches and single links) saved in a local database (Room); search, filter by
   status, copy all final links, export CSV.
 
+## Telegram channels (private too)
+
+The **Telegram** tab logs in to your own Telegram account with Telegram's official library
+([TDLib](https://github.com/tdlib/td)) — read-only: it lists your chats and reads history, it never sends anything.
+
+1. One time: get your own API ID at [my.telegram.org](https://my.telegram.org/apps) → *API development tools* →
+   create an app → copy **api_id** and **api_hash** into the app. They are stored only on the phone (never in this
+   repo or the APK).
+2. Log in: phone number → code (arrives in Telegram) → 2-step password if you have one. The session is kept in
+   the app's private storage (TDLib database encrypted with a random key).
+3. Pick a channel → the app reads the newest 200 messages (*Load older* / *Load 1000 more* for more) and lists every
+   post with supported links — including links hidden behind text, link previews and URL buttons. Each link shows
+   ✓ and its final link if it was resolved before. Posts since your last visit are marked **NEW**.
+4. Select links (per link, per post, *Unresolved*, *New*, *All*) → **Resolve N selected** → a normal batch; results
+   are saved with the channel name and post id.
+
+TDLib is compiled once by `.github/workflows/tdlib.yml` (commit pinned in `tdlib/VERSION`, arm64-v8a only) and
+published as the `tdlib-<commit>` prerelease; the `:tdlib` module downloads it at build time. To update TDLib, change
+`tdlib/VERSION` and push — the workflow builds the new version.
+
 ## Install
 
 Every push builds a **debug APK** with GitHub Actions. Every push to `main` also publishes a
@@ -73,9 +93,11 @@ app/src/main/java/com/nik/linkresolver/
   engine/QueueWorker                            parallel queue (Semaphore), one session per link
   data/     settings, debug bundle store, Room DB (data/db), BatchManager (queue in DB)
   service/  ResolveService — foreground service that drains the queue
+  telegram/ TDLib client wrapper (login, chats, history), link extraction from posts, Telegram tab
+tdlib/      module: downloads the prebuilt TDLib (Java API + libtdjni.so)
   ui/       Compose screens + ViewModel (resolution survives rotation)
 ```
 
-Build locally: `./gradlew lint testDebugUnitTest assembleDebug` (JDK 17+, Android SDK 37).
+Build locally: `./gradlew :app:lint testDebugUnitTest assembleDebug` (JDK 17+, Android SDK 37).
 
 The final destination is **never requested**: once a redirect leaves the flow hosts, that URL is the result.

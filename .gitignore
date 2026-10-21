@@ -8,3 +8,6 @@ captures/
 *.jks
 *.keystore
 !debug.keystore
+tdlib/src/main/java/
+tdlib/src/main/jniLibs/
+tdlib/src/main/.tdlib-commit

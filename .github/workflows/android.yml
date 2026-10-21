@@ -28,15 +28,12 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
-      - name: Compute version
+      - name: Read version
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VN="${GITHUB_REF_NAME#v}"
-          else
-            VN="0.1.${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
-          fi
+          VN=$(grep '^versionName=' version.properties | cut -d= -f2 | tr -d '[:space:]')
+          VC=$(grep '^versionCode=' version.properties | cut -d= -f2 | tr -d '[:space:]')
           echo "VERSION_NAME=$VN" >> "$GITHUB_ENV"
-          echo "Version: $VN (code $GITHUB_RUN_NUMBER)"
+          echo "Version: $VN (code $VC)"
 
       - name: Lint, test, build
         run: ./gradlew lint testDebugUnitTest assembleDebug
@@ -64,7 +61,7 @@ jobs:
       - name: Release tag
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v0.1.${GITHUB_RUN_NUMBER}"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v${VERSION_NAME}"; fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: GitHub Release

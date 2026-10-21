@@ -3,11 +3,12 @@ name: Android CI
 on:
   push:
     branches: ["**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # to create tags and releases
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -58,3 +59,21 @@ jobs:
             app/build/reports/
             app/build/test-results/
           if-no-files-found: ignore
+
+      # Every push to main (and any v* tag you push) becomes a GitHub Release with the APK attached.
+      - name: Release tag
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"; else TAG="v0.1.${GITHUB_RUN_NUMBER}"; fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: GitHub Release
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Link Resolver ${{ env.VERSION_NAME }}
+          files: link-resolver-${{ env.VERSION_NAME }}.apk
+          generate_release_notes: true
+          make_latest: true

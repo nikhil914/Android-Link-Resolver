@@ -1,5 +1,7 @@
 package com.nik.linkresolver.ui
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -261,6 +263,29 @@ fun SettingsScreen(
                 Text("Learned extra waits", style = MaterialTheme.typography.titleSmall)
                 tuned.forEach { (site, ms) -> Text("$site: +${"%.1f".format(ms / 1000.0)} s per step", style = MaterialTheme.typography.bodyMedium) }
                 TextButton(onClick = { g.sites.resetTuning(); tuned = g.sites.tunedSites() }) { Text("Reset") }
+            }
+        }
+
+        // ---- site rules
+        Section("Site rules") {
+            val rs by g.rules.status.collectAsStateWithLifecycle()
+            var checkingRules by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            Text(
+                if (rs.version == 0) "Built-in rules" else "v${rs.version} (${rs.source}" + (if (rs.updated.isNotEmpty()) ", ${rs.updated}" else "") + ") · ${rs.sites} site" + (if (rs.sites == 1) "" else "s"),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                "Waits, form names and hosts per site, downloaded from the GitHub repo once a day, so small site changes need no app update." +
+                    (if (rs.checkedAt > 0) "\nLast check ${formatTime(rs.checkedAt)}" + (if (rs.message.isNotEmpty()) ": ${rs.message}" else "") else ""),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    checkingRules = true
+                    scope.launch { g.rules.refresh(); checkingRules = false }
+                }, enabled = !checkingRules) { Text(if (checkingRules) "Checking…" else "Check now") }
+                if (rs.source == "downloaded") TextButton(onClick = { g.rules.reset() }) { Text("Use bundled") }
             }
         }
 

@@ -29,6 +29,7 @@ class AppGraph(app: Application) {
     val http = OkHttpFactory()
     val sites = SiteStore(app)
     val registry = ResolverRegistry.default(sites.domains)
+    val rules = com.nik.linkresolver.data.RulesStore(app, registry, sites.domains).also { it.load() }
     val runner = ResolverRunner(registry, tuning = sites.tuning)
     val db = AppDatabase.create(app)
     val batches = BatchManager(app, db.resolves(), registry)
@@ -47,6 +48,7 @@ class LinkResolverApp : Application() {
         graph.batches.onResolved = { url ->
             if (graph.settings.autoBotStart && TelegramUri.botStart(url) != null) graph.appScope.launch { graph.bots.request(url) }
         }
+        if (graph.rules.dueForCheck()) graph.appScope.launch { graph.rules.refresh() }
         // A collection save cut off by a killed process is no longer running.
         graph.appScope.launch { graph.db.collections().clearStaleSaving() }
     }

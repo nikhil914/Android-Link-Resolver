@@ -54,8 +54,10 @@ android {
 
     buildTypes {
         release {
-            // Kept off in v1: no shrinking surprises with Jsoup/OkHttp, and the APK is small anyway.
-            isMinifyEnabled = false
+            // R8 shrinking: TDLib's JNI classes are kept by the :tdlib consumer rules, the rest in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }

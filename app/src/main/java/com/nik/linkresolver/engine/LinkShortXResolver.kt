@@ -10,10 +10,15 @@ import okhttp3.HttpUrl
  * Times are in milliseconds.
  */
 data class LinkShortXConfig(
-    /** Hosts a tapped/shared link may have for this resolver to pick it up. */
-    val entryHosts: Set<String> = setOf("linkshortx.in"),
-    /** Hosts that are part of the flow; leaving them means we reached the destination. */
-    val flowHosts: Set<String> = setOf("linkshortx.in", "hindisink.com"),
+    /** Hosts a tapped/shared link may have for this resolver to pick it up (same AdLinkFly-based network). */
+    val entryHosts: Set<String> = setOf("linkshortx.in", "urlshortx.io"),
+    /**
+     * Known intermediate (blog) hosts. Leaving the flow hosts means we reached the destination. The entry host is
+     * always in the flow, and new blog hosts are learned at runtime (see [LinkShortXResolver.resolve]).
+     */
+    val flowHosts: Set<String> = setOf("hindisink.com"),
+    /** Never treated as part of the flow, even if a rule would learn them. */
+    val destinationHosts: Set<String> = setOf("t.me", "telegram.me", "telegram.dog"),
     /** Minimum time between receiving a step page (2+) and POSTing it. Server rejects ≤ ~8 s. */
     val stepWaitMs: Long = 9_200,
     /** Same for step 1. Was 0 (instant) until Oct 2026; the live site now enforces ~9 s on step 1 too. */
@@ -39,7 +44,6 @@ data class LinkShortXConfig(
 class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig()) : Resolver {
     override val name = "LinkShortX"
 
-    private val follower = RedirectFollower(config.flowHosts)
     private val stepTitle = Regex("""Step\s+(\d+)\s+of\s+(\d+)""", RegexOption.IGNORE_CASE)
     private val counterValue = Regex("""counter_value["']?\s*:\s*["']?(\d+)""")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -54,8 +58,11 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
     override suspend fun resolve(url: HttpUrl, ctx: ResolveContext): String {
         var stepWait = config.stepWaitMs
         var firstStepWait = config.firstStepWaitMs
+        val follower = RedirectFollower(config.flowHosts + config.entryHosts + url.host)
         ctx.progress(ResolveEvent.Fetching(url.toString()))
-        var res = follower.follow(ctx, ctx.http.get(url))
+        val first = ctx.http.get(url)
+        learnBlogHost(ctx, follower, url, first)
+        var res = follower.follow(ctx, first)
         var pending: Pending? = null
         var retries = 0
 
@@ -73,10 +80,13 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
             // ---- hindisink "Step X of N" page
             val fwd = parsed.form(config.stepFormId)
             if (fwd != null && fwd.method == "post") {
+                // A step page's own host and its form target are part of the flow by definition.
+                learn(ctx, follower, page.url.host)
                 val m = stepTitle.find(parsed.title)
                 val step = m?.groupValues?.get(1)?.toInt() ?: 99
                 val total = m?.groupValues?.get(2) ?: "?"
                 val action = page.url.resolve(fwd.action.ifEmpty { page.url.toString() }) ?: page.url
+                learn(ctx, follower, action.host)
                 val wait = if (step == 1) firstStepWait else stepWait
                 if (wait > 0) {
                     val left = wait - (ctx.clock.nowMs() - page.receivedAtMs)
@@ -117,6 +127,26 @@ class LinkShortXResolver(private val config: LinkShortXConfig = LinkShortXConfig
                     if (p != null) " (step still rejected after ${config.maxRetries} retries)" else "",
             )
         }
+    }
+
+    /**
+     * The entry host 3xx-redirects to its blog with the original link in the query
+     * (`hindisink.com/q7m4vk29.php?id=https://linkshortx.in/<code>#...`). That proves the target is the next flow
+     * host, not the destination, so new blog domains work without an app update.
+     */
+    private fun learnBlogHost(ctx: ResolveContext, follower: RedirectFollower, entry: HttpUrl, first: Page) {
+        val next = first.location ?: return
+        if (!first.isRedirect || follower.inFlow(next)) return
+        val carriesEntry = (0 until next.querySize).any { i ->
+            next.queryParameterValue(i)?.contains(entry.host, ignoreCase = true) == true
+        }
+        if (carriesEntry) learn(ctx, follower, next.host)
+    }
+
+    private fun learn(ctx: ResolveContext, follower: RedirectFollower, host: String) {
+        val h = host.lowercase()
+        if (config.destinationHosts.any { h == it || h.endsWith(".$it") }) return
+        if (follower.addFlowHost(h)) ctx.log("flow host: $h")
     }
 
     private suspend fun getLink(ctx: ResolveContext, page: Page, form: HtmlForm?): String {

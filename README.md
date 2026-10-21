@@ -1,10 +1,12 @@
 # Link Resolver
 
 Native Android app that resolves shortlinks to their final link **in the background over plain HTTP**: no browser, no ads.
-Tap a `linkshortx.in` link (e.g. in Telegram), the app opens, waits out the server timers, and shows the final
+Tap a `linkshortx.in` or `urlshortx.io` link (e.g. in Telegram), the app opens, waits out the server timers, and shows the final
 `telegram.me` / `t.me` link. Tap **Open** to go to Telegram.
 
-v1 supports the LinkShortX flow (`linkshortx.in` → `hindisink.com` "Step 1..N" → `linkshortx.in` "Get Link").
+v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link → blog "Step 1..N" pages
+(e.g. `hindisink.com`) → entry host "Get Link" → destination. A new blog domain is picked up automatically: the
+entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
 ## Install
@@ -18,9 +20,9 @@ update over the old one.
 ## Phone setup (one time)
 
 1. **Open by default** (Android 12+): open the app and tap **Enable link opening**. Turn on *Open supported links*
-   and tick `linkshortx.in`. The card in the app turns green when it's done.
+   and tick `linkshortx.in` and `urlshortx.io`. The card in the app turns green when it's done.
 2. **Telegram**: Telegram opens links in its own in-app browser, which never hands them to Android.
-   In Telegram go to *Settings → Chat Settings* and turn off *In-App Browser*. Tapping a `linkshortx.in` link then
+   In Telegram go to *Settings → Chat Settings* and turn off *In-App Browser*. Tapping a supported link then
    opens Link Resolver.
 3. **Network**: the site blocks VPN/proxy/datacenter IPs, and some home broadband connections can't reach it at all.
    *Force mobile data* (on by default) routes requests over mobile data even when Wi-Fi is connected. If mobile data

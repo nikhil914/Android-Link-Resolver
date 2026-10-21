@@ -132,6 +132,31 @@ class LinkShortXResolverTest {
     }
 
     @Test
+    fun urlShortXWithUnknownBlogHostIsLearned() {
+        // urlshortx.io is the same network; its blog domain may differ. The first redirect carries the entry link in
+        // its query, so the new blog host is treated as part of the flow instead of as the destination.
+        site = FakeLinkShortX(clock, entryHost = "urlshortx.io", blogHost = "some-new-blog.com").start()
+        val debug = InMemoryDebugRecorder(clock)
+        val result = resolve(debug = debug)
+        assertEquals(site.finalUrl, (result as ResolveResult.Success).finalUrl)
+        assertTrue(debug.asText().contains("flow host: some-new-blog.com"))
+        assertTrue(site.seen.all { it.host == "urlshortx.io" || it.host == "some-new-blog.com" })
+    }
+
+    @Test
+    fun redirectWithoutEntryLinkIsNotLearned() {
+        // A plain 302 from the entry host to an unknown host (no entry link in the query) is the destination.
+        site = FakeLinkShortX(clock, entryHost = "urlshortx.io", blogHost = "some-new-blog.com").start()
+        site.override = { r ->
+            if (r.path == "/AbC123") MockResponse().setResponseCode(302).addHeader("Location", "https://drive.example.org/file/1")
+            else null
+        }
+        val result = resolve() as ResolveResult.Success
+        assertEquals("https://drive.example.org/file/1", result.finalUrl)
+        assertEquals(1, site.seen.size)
+    }
+
+    @Test
     fun givesUpAfterMaxRetries() {
         site = FakeLinkShortX(clock, minStepMs = 60_000).start()
         val result = resolve()

@@ -43,7 +43,7 @@ import com.nik.linkresolver.BuildConfig
 import com.nik.linkresolver.graph
 
 class MainActivity : ComponentActivity() {
-    private var linkStatus by mutableStateOf(LinkStatus.UNKNOWN)
+    private var linkStatus by mutableStateOf(LINK_HOSTS.associateWith { LinkStatus.UNKNOWN })
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -85,26 +85,29 @@ class MainActivity : ComponentActivity() {
 
 enum class LinkStatus { UNKNOWN, ENABLED, DISABLED, NOT_NEEDED }
 
-const val LINK_HOST = "linkshortx.in"
+/** Hosts declared in the manifest's VIEW intent filter. */
+val LINK_HOSTS = listOf("linkshortx.in", "urlshortx.io")
 
-fun linkOpeningStatus(ctx: Context): LinkStatus {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return LinkStatus.NOT_NEEDED
-    val dvm = ctx.getSystemService(DomainVerificationManager::class.java) ?: return LinkStatus.UNKNOWN
-    val state = runCatching { dvm.getDomainVerificationUserState(ctx.packageName) }.getOrNull() ?: return LinkStatus.UNKNOWN
-    val host = state.hostToStateMap[LINK_HOST] ?: return LinkStatus.UNKNOWN
-    return if (state.isLinkHandlingAllowed &&
-        (host == DomainVerificationUserState.DOMAIN_STATE_SELECTED || host == DomainVerificationUserState.DOMAIN_STATE_VERIFIED)
-    ) {
-        LinkStatus.ENABLED
-    } else {
-        LinkStatus.DISABLED
+/** Per-host status of "Open supported links" (Android 12+). */
+fun linkOpeningStatus(ctx: Context): Map<String, LinkStatus> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return LINK_HOSTS.associateWith { LinkStatus.NOT_NEEDED }
+    val dvm = ctx.getSystemService(DomainVerificationManager::class.java)
+    val state = runCatching { dvm?.getDomainVerificationUserState(ctx.packageName) }.getOrNull()
+        ?: return LINK_HOSTS.associateWith { LinkStatus.UNKNOWN }
+    return LINK_HOSTS.associateWith { host ->
+        when (state.hostToStateMap[host]) {
+            null -> LinkStatus.UNKNOWN
+            DomainVerificationUserState.DOMAIN_STATE_SELECTED, DomainVerificationUserState.DOMAIN_STATE_VERIFIED ->
+                if (state.isLinkHandlingAllowed) LinkStatus.ENABLED else LinkStatus.DISABLED
+            else -> LinkStatus.DISABLED
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    linkStatus: LinkStatus,
+    linkStatus: Map<String, LinkStatus>,
     initialForceMobile: Boolean,
     initialAutoOpen: Boolean,
     onForceMobile: (Boolean) -> Unit,
@@ -127,7 +130,7 @@ fun MainScreen(
                 value = text,
                 onValueChange = { text = it },
                 label = { Text("Shortlink") },
-                placeholder = { Text("https://linkshortx.in/…") },
+                placeholder = { Text("https://linkshortx.in/… or https://urlshortx.io/…") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -141,12 +144,8 @@ fun MainScreen(
             }
 
             // ---- link opening setup
-            val (statusText, ok) = when (linkStatus) {
-                LinkStatus.ENABLED -> "✓ $LINK_HOST links open in this app" to true
-                LinkStatus.DISABLED -> "✗ $LINK_HOST links open in the browser" to false
-                LinkStatus.NOT_NEEDED -> "Android will ask which app to use for $LINK_HOST links" to true
-                LinkStatus.UNKNOWN -> "Link opening status unknown" to false
-            }
+            val notNeeded = linkStatus.values.all { it == LinkStatus.NOT_NEEDED }
+            val ok = linkStatus.values.all { it == LinkStatus.ENABLED || it == LinkStatus.NOT_NEEDED }
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -155,11 +154,19 @@ fun MainScreen(
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Open links in this app", style = MaterialTheme.typography.titleMedium)
-                    Text(statusText, style = MaterialTheme.typography.bodyLarge)
-                    if (linkStatus != LinkStatus.NOT_NEEDED) {
+                    for ((host, st) in linkStatus) {
+                        val line = when (st) {
+                            LinkStatus.ENABLED -> "✓ $host opens in this app"
+                            LinkStatus.DISABLED -> "✗ $host opens in the browser"
+                            LinkStatus.NOT_NEEDED -> "Android will ask which app to use for $host"
+                            LinkStatus.UNKNOWN -> "? $host — status unknown"
+                        }
+                        Text(line, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    if (!notNeeded) {
                         Text(
                             "Android 12+ only opens unverified links in an app if you allow it: tap below, turn on " +
-                                "“Open supported links”, then tick $LINK_HOST under the supported links.",
+                                "“Open supported links”, then tick every domain under the supported links.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Button(onClick = onEnableLinks) { Text("Enable link opening") }
@@ -173,7 +180,7 @@ fun MainScreen(
                     Text(
                         "Telegram opens links in its own in-app browser, which never hands them to Android. " +
                             "In Telegram: Settings → Chat Settings → turn off “In-App Browser” (external links then go " +
-                            "to Android). After that, tapping a $LINK_HOST link opens this app.\n\n" +
+                            "to Android). After that, tapping a supported link opens this app.\n\n" +
                             "Fallback that always works: long-press the link → Share → Link Resolver.",
                         style = MaterialTheme.typography.bodySmall,
                     )

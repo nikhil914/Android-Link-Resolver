@@ -16,12 +16,15 @@ data class HtmlForm(
 
 data class HtmlAnchor(val href: String, val classes: Set<String>, val id: String)
 
+data class HtmlScript(val src: String, val text: String)
+
 data class ParsedPage(
     val title: String,
     val forms: List<HtmlForm>,
     val anchors: List<HtmlAnchor>,
     val ids: Set<String>,
     val metaRefresh: String?,
+    val scripts: List<HtmlScript> = emptyList(),
 ) {
     fun form(id: String): HtmlForm? = forms.firstOrNull { it.id == id }
 }
@@ -53,7 +56,9 @@ object PageParser {
             ?.attr("content")
             ?.let { META_URL.find(it)?.groupValues?.get(1)?.trim() }
 
-        return ParsedPage(title, forms, anchors, ids, meta)
+        val scripts = doc.select("script").map { HtmlScript(it.attr("src"), it.data()) }
+
+        return ParsedPage(title, forms, anchors, ids, meta, scripts)
     }
 
     /** Named controls a browser would submit: skips buttons/submit/image/file, unchecked boxes, disabled. */

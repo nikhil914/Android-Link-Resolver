@@ -157,6 +157,17 @@ class LinkShortXResolverTest {
     }
 
     @Test
+    fun getLinkPageIsDescribedInLog() {
+        site = FakeLinkShortX(clock).start()
+        val debug = InMemoryDebugRecorder(clock)
+        resolve(debug = debug)
+        val log = debug.asText()
+        assertTrue(log, log.contains("get-link fields: _method(4), _csrfToken(5), ad_form_data(8)"))
+        assertTrue(log, log.contains("inline script #0"))
+        assertTrue(log, log.contains("get-link form html: <form id=\"go-link\""))
+    }
+
+    @Test
     fun givesUpAfterMaxRetries() {
         site = FakeLinkShortX(clock, minStepMs = 60_000).start()
         val result = resolve()

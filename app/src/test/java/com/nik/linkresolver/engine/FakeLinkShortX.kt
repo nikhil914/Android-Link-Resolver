@@ -32,6 +32,8 @@ class FakeLinkShortX(
     private val clock: FakeClock,
     private val steps: Int = 3,
     private val minStepMs: Long = 9_000,
+    /** The live site enforces ~9 s on step 1 too (since Oct 2026). */
+    private val minFirstStepMs: Long = 9_000,
     private val counterS: Int = 5,
     val finalUrl: String = "https://telegram.me/somechannel?start=abc123",
 ) : Dispatcher() {
@@ -92,7 +94,8 @@ class FakeLinkShortX(
             host == "hindisink.com" && path == "/go" && request.method == "POST" -> {
                 val token = Regex("token=t(\\d+)").find(body)?.groupValues?.get(1)?.toInt()
                     ?: return article("Bad token")
-                if (token >= 2 && clock.now - servedAt.getValue(token) < minStepMs) {
+                val min = if (token == 1) minFirstStepMs else minStepMs
+                if (clock.now - servedAt.getValue(token) < min) {
                     rejections++
                     return article("Ten Tips For Healthy Living")
                 }

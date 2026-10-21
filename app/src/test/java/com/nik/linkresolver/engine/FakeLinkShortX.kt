@@ -36,6 +36,8 @@ class FakeLinkShortX(
     private val minFirstStepMs: Long = 9_000,
     private val counterS: Int = 5,
     val finalUrl: String = "https://telegram.me/somechannel?start=abc123",
+    val entryHost: String = "linkshortx.in",
+    val blogHost: String = "hindisink.com",
 ) : Dispatcher() {
     val server = MockWebServer()
     val seen: MutableList<Seen> = Collections.synchronizedList(mutableListOf())
@@ -49,7 +51,7 @@ class FakeLinkShortX(
 
     val port get() = server.port
     fun url(host: String, path: String) = "http://$host:$port$path"
-    val entryUrl get() = url("linkshortx.in", "/AbC123")
+    val entryUrl get() = url(entryHost, "/AbC123")
 
     fun start(): FakeLinkShortX {
         server.dispatcher = this
@@ -61,7 +63,7 @@ class FakeLinkShortX(
     fun client(readTimeoutMs: Long = 5_000): OkHttpClient = OkHttpClient.Builder()
         .dns(object : Dns {
             override fun lookup(hostname: String): List<InetAddress> =
-                if (hostname == "linkshortx.in" || hostname == "hindisink.com") listOf(InetAddress.getByName("127.0.0.1"))
+                if (hostname == entryHost || hostname == blogHost) listOf(InetAddress.getByName("127.0.0.1"))
                 else throw UnknownHostException("test dns: $hostname must never be requested")
         })
         .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
@@ -76,22 +78,22 @@ class FakeLinkShortX(
         override?.invoke(request)?.let { return it }
 
         return when {
-            host == "linkshortx.in" && path == "/AbC123" ->
+            host == entryHost && path == "/AbC123" ->
                 MockResponse().setResponseCode(307)
-                    .addHeader("Location", url("hindisink.com", "/q7m4vk29.php?id=xyz&t=1"))
+                    .addHeader("Location", url(blogHost, "/q7m4vk29.php?id=" + java.net.URLEncoder.encode(entryUrl + "#hsfn1.abc", "UTF-8") + "&t=1"))
                     .addHeader("Set-Cookie", "AppSession=s1; Path=/")
                     .addHeader("Set-Cookie", "refAbC123=1; Path=/")
 
-            host == "hindisink.com" && path.startsWith("/q7m4vk29.php") ->
+            host == blogHost && path.startsWith("/q7m4vk29.php") ->
                 html(
                     """<html><head><title></title></head><body><script>
-                    setTimeout(function(){ window.location.href = "${url("hindisink.com", "")}"; });
+                    setTimeout(function(){ window.location.href = "${url(blogHost, "")}"; });
                     </script></body></html>""",
                 ).addHeader("Set-Cookie", "link=AbC123; Path=/")
 
-            host == "hindisink.com" && path == "/" && request.method == "GET" -> stepPage(1)
+            host == blogHost && path == "/" && request.method == "GET" -> stepPage(1)
 
-            host == "hindisink.com" && path == "/go" && request.method == "POST" -> {
+            host == blogHost && path == "/go" && request.method == "POST" -> {
                 val token = Regex("token=t(\\d+)").find(body)?.groupValues?.get(1)?.toInt()
                     ?: return article("Bad token")
                 val min = if (token == 1) minFirstStepMs else minStepMs
@@ -100,15 +102,15 @@ class FakeLinkShortX(
                     return article("Ten Tips For Healthy Living")
                 }
                 if (token < steps) stepPage(token + 1)
-                else MockResponse().setResponseCode(302).addHeader("Location", url("linkshortx.in", "/AbC123?done=1"))
+                else MockResponse().setResponseCode(302).addHeader("Location", url(entryHost, "/AbC123?done=1"))
             }
 
-            host == "linkshortx.in" && path == "/AbC123?done=1" -> {
+            host == entryHost && path == "/AbC123?done=1" -> {
                 getLinkServedAt = clock.now
                 html(getLinkPage())
             }
 
-            host == "linkshortx.in" && path == "/links/go" && request.method == "POST" -> {
+            host == entryHost && path == "/links/go" && request.method == "POST" -> {
                 val ajax = request.getHeader("X-Requested-With") == "XMLHttpRequest"
                 if (!ajax || clock.now - getLinkServedAt < counterS * 1000L || !body.contains("_csrfToken=csrf1")) {
                     json("""{"status":"error","message":"Bad Request.","url":""}""")

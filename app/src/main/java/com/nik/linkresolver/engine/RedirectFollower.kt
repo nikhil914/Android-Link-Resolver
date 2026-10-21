@@ -15,9 +15,16 @@ sealed class FollowResult {
  * Anything pointing outside is returned as [FollowResult.Final] without being requested.
  */
 class RedirectFollower(
-    private val flowHosts: Set<String>,
+    flowHosts: Set<String>,
     private val smallPageBytes: Int = 4000,
 ) {
+    private val flowHosts: MutableSet<String> = flowHosts.map { it.lowercase() }.toMutableSet()
+
+    val hosts: Set<String> get() = flowHosts.toSet()
+
+    /** Adds a host discovered during this resolve (e.g. a new blog domain). Returns true if it was new. */
+    fun addFlowHost(host: String): Boolean = flowHosts.add(host.lowercase().removePrefix("www."))
+
     fun inFlow(url: HttpUrl): Boolean {
         val host = url.host.lowercase()
         return flowHosts.any { host == it || host.endsWith(".$it") }

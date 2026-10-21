@@ -56,9 +56,12 @@ import com.nik.linkresolver.BuildConfig
 import com.nik.linkresolver.data.db.BatchSummary
 import com.nik.linkresolver.data.db.Source
 import com.nik.linkresolver.graph
+import com.nik.linkresolver.telegram.TelegramScreen
+import com.nik.linkresolver.telegram.TelegramViewModel
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
+    private val tgVm: TelegramViewModel by viewModels()
     private var linkStatus by mutableStateOf(LINK_HOSTS.associateWith { LinkStatus.UNKNOWN })
     private var tab by mutableStateOf(TAB_HOME)
     private var openBatch by mutableStateOf<Long?>(null)
@@ -104,6 +107,11 @@ class MainActivity : ComponentActivity() {
                         icon = { Text("⌂") }, label = { Text("Resolve") },
                     )
                     NavigationBarItem(
+                        selected = tab == TAB_TELEGRAM && openBatch == null,
+                        onClick = { tab = TAB_TELEGRAM; openBatch = null },
+                        icon = { Text("✈") }, label = { Text("Telegram") },
+                    )
+                    NavigationBarItem(
                         selected = tab == TAB_HISTORY && openBatch == null,
                         onClick = { tab = TAB_HISTORY; openBatch = null },
                         icon = { Text("☰") }, label = { Text("History") },
@@ -116,6 +124,7 @@ class MainActivity : ComponentActivity() {
             when {
                 batch != null -> BatchScreen(vm, batch, m)
                 tab == TAB_HISTORY -> HistoryScreen(vm, m)
+                tab == TAB_TELEGRAM -> TelegramScreen(tgVm, onOpenBatch = { openBatch = it }, modifier = m)
                 else -> HomeScreen(m)
             }
         }
@@ -297,6 +306,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_BATCH = "batch"
         const val TAB_HOME = "home"
         const val TAB_HISTORY = "history"
+        const val TAB_TELEGRAM = "telegram"
 
         fun openBatch(context: Context, batchId: Long) = Intent(context, MainActivity::class.java)
             .putExtra(EXTRA_BATCH, batchId)

@@ -30,6 +30,8 @@ android {
         targetSdk = 37
         versionCode = ciVersionCode
         versionName = ciVersionName
+        // TDLib is only built for arm64 (every current phone).
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     signingConfigs {
@@ -94,6 +96,7 @@ dependencies {
     implementation(libs.jsoup)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(project(":tdlib"))
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)

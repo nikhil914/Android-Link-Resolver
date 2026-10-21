@@ -9,6 +9,8 @@ import com.nik.linkresolver.engine.ResolverRegistry
 import com.nik.linkresolver.engine.ResolverRunner
 import com.nik.linkresolver.net.NetworkHelper
 import com.nik.linkresolver.net.OkHttpFactory
+import com.nik.linkresolver.telegram.TelegramClient
+import com.nik.linkresolver.telegram.TelegramPrefs
 
 /** Manual object graph (no DI framework in v1). */
 class AppGraph(app: Application) {
@@ -20,6 +22,7 @@ class AppGraph(app: Application) {
     val runner = ResolverRunner(registry)
     val db = AppDatabase.create(app)
     val batches = BatchManager(app, db.resolves(), registry)
+    val telegram by lazy { TelegramClient(app, TelegramPrefs(app)) }
 }
 
 class LinkResolverApp : Application() {

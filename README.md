@@ -9,7 +9,7 @@ v1 supports the LinkShortX network (`linkshortx.in`, `urlshortx.io`): entry link
 entry host's first redirect carries the original link in its query, which marks the target as part of the flow.
 It usually takes 20–40 s, because the site enforces a real wait of about 9 s on its server for each step.
 
-`droplink.co` (since 0.1.17): the entry link redirects to `tech8s.net/safe2.php?link=<code>`, which sends the browser
+`droplink.co` (since 0.1.18): the entry link redirects to `tech8s.net/safe2.php?link=<code>`, which sends the browser
 through a Google redirect to a blog article. The app skips Google, and when the article has no step form it opens
 the droplink link again with the article as Referer, which brings up droplink's usual AdLinkFly "Get Link" page.
 This is the `returnToEntry` (and `returnWaitMs`) switch in the site rules.

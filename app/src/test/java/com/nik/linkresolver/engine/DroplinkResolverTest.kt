@@ -17,7 +17,9 @@ class DroplinkResolverTest {
     private val clock = FakeClock()
     private lateinit var site: FakeLinkShortX
 
-    @After fun tearDown() = site.stop()
+    @After fun tearDown() {
+        if (::site.isInitialized) site.stop()
+    }
 
     private fun droplink(returnWaitMs: Long = 0) = LinkShortXResolver(
         LinkShortXConfig(

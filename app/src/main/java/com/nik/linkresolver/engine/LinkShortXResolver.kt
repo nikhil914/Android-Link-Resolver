@@ -54,6 +54,13 @@ data class LinkShortXConfig(
     val armFallbackPath: String = "/links/arm",
     val armAttempts: Int = 3,
     val armRetryDelayMs: Long = 1_000,
+    /**
+     * Droplink-style sites: the blog article has no step form, and the shortener only shows its Get Link page when
+     * the link is opened again with the blog as Referer. When a flow page is not recognised, go back to the entry
+     * link once with that page as Referer, after waiting [returnWaitMs] since the page arrived.
+     */
+    val returnToEntry: Boolean = false,
+    val returnWaitMs: Long = 0,
     val maxHops: Int = 40,
 )
 
@@ -89,6 +96,7 @@ class LinkShortXResolver(
         var sawFlowPage = false
         var probes = 0
         var probed: HttpUrl? = null
+        var returned = false
         val follower = RedirectFollower(config.flowHosts + config.entryHosts + url.host)
         ctx.progress(ResolveEvent.Fetching(url.toString()))
         val first = ctx.http.get(url)
@@ -182,6 +190,19 @@ class LinkShortXResolver(
                 continue
             }
 
+            // ---- Droplink-style blog article: open the entry link again with the article as Referer
+            if (config.returnToEntry && !returned && !sameHost(page.url, url)) {
+                returned = true
+                sawFlowPage = true
+                val back = entryLinkOn(page, url) ?: url
+                val left = config.returnWaitMs - (ctx.clock.nowMs() - page.receivedAtMs)
+                ctx.log("blog page «${parsed.title}» at ${page.url.host}: going back to $back with it as referer")
+                if (left > 0) ctx.countdown(left) { ResolveEvent.StepWaiting(1, "1", it) }
+                ctx.progress(ResolveEvent.Fetching(back.toString()))
+                res = follower.follow(ctx, ctx.http.get(back, page.url), page.url)
+                continue
+            }
+
             // Generic mode: a probed page that is no flow page is the destination itself.
             val pr = probed
             if (pr != null && !sawFlowPage) {
@@ -195,21 +216,26 @@ class LinkShortXResolver(
             throw ResolveException(
                 ErrorKind.UNRECOGNISED_PAGE,
                 "Unrecognised page «${parsed.title}» at ${page.url}" +
-                    if (p != null) " (step still rejected after ${config.maxRetries} retries)" else "",
+                    if (p != null) " (step still rejected after ${config.maxRetries} retries)"
+                    else if (returned) " (going back to the link with the blog as referer did not unlock it)"
+                    else "",
             )
         }
     }
 
     /**
      * The entry host 3xx-redirects to its blog with the original link in the query
-     * (`hindisink.com/q7m4vk29.php?id=https://linkshortx.in/<code>#...`). That proves the target is the next flow
-     * host, not the destination, so new blog domains work without an app update.
+     * (`hindisink.com/q7m4vk29.php?id=https://linkshortx.in/<code>#...`, or just the code as in
+     * `tech8s.net/safe2.php?link=<code>`). That proves the target is the next flow host, not the destination, so new
+     * blog domains work without an app update.
      */
     private fun learnBlogHost(ctx: ResolveContext, follower: RedirectFollower, entry: HttpUrl, first: Page) {
         val next = first.location ?: return
         if (!first.isRedirect || follower.inFlow(next)) return
+        val code = entry.pathSegments.lastOrNull { it.isNotEmpty() }?.takeIf { it.length >= 4 }
         val carriesEntry = (0 until next.querySize).any { i ->
-            next.queryParameterValue(i)?.contains(entry.host, ignoreCase = true) == true
+            val v = next.queryParameterValue(i) ?: return@any false
+            v.contains(entry.host, ignoreCase = true) || v == code
         }
         if (carriesEntry) learn(ctx, follower, next.host)
     }
@@ -256,6 +282,15 @@ class LinkShortXResolver(
         val formHtml = Regex("<form[^>]*id=[\"']?${config.getLinkFormId}[\"']?[\\s\\S]*?</form>", RegexOption.IGNORE_CASE).find(body)?.value
         if (formHtml != null) ctx.log("get-link form html: ${formHtml.replace(Regex("\\s+"), " ").take(2500)}")
     }
+
+    private fun sameHost(a: HttpUrl, b: HttpUrl) =
+        a.host.lowercase().removePrefix("www.") == b.host.lowercase().removePrefix("www.")
+
+    /** A link on [page] back to the entry link (it may carry extra query parameters the site wants). */
+    private fun entryLinkOn(page: Page, entry: HttpUrl): HttpUrl? =
+        page.parsed.anchors.asSequence()
+            .mapNotNull { page.url.resolve(it.href) }
+            .firstOrNull { sameHost(it, entry) && it.encodedPath == entry.encodedPath }
 
     private fun isDestination(url: HttpUrl): Boolean {
         val h = url.host.lowercase()

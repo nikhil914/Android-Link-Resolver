@@ -317,7 +317,7 @@ class MainActivity : FragmentActivity() {
 enum class LinkStatus { UNKNOWN, ENABLED, DISABLED, NOT_NEEDED }
 
 /** Hosts declared in the manifest's VIEW intent filter. */
-val LINK_HOSTS = listOf("linkshortx.in", "urlshortx.io")
+val LINK_HOSTS = listOf("linkshortx.in", "urlshortx.io", "droplink.co")
 
 /** Per-host status of "Open supported links" (Android 12+). */
 fun linkOpeningStatus(ctx: Context): Map<String, LinkStatus> {

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "minAppVersion": 16,
-  "updated": "2026-10-21",
+  "minAppVersion": 17,
+  "updated": "2026-10-28",
   "sites": [
     {
       "name": "LinkShortX",
@@ -24,6 +24,13 @@
       "armFallbackPath": "/links/arm",
       "armAttempts": 3,
       "armRetryDelayMs": 1000
+    },
+    {
+      "name": "Droplink",
+      "hosts": ["droplink.co"],
+      "flowHosts": ["tech8s.net", "game5s.com"],
+      "returnToEntry": true,
+      "returnWaitMs": 0
     }
   ],
   "generic": {

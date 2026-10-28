@@ -63,6 +63,7 @@
                 <data android:scheme="http" />
                 <data android:host="linkshortx.in" />
                 <data android:host="urlshortx.io" />
+                <data android:host="droplink.co" />
             </intent-filter>
 
             <intent-filter>

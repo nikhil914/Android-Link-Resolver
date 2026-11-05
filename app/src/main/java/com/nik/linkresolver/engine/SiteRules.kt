@@ -97,6 +97,8 @@ data class SiteRules(
                 armFallbackPath = path("armFallbackPath", base.armFallbackPath),
                 armAttempts = n("armAttempts", base.armAttempts, 10).coerceAtLeast(1),
                 armRetryDelayMs = ms("armRetryDelayMs", base.armRetryDelayMs, 30_000),
+                returnToEntry = o.bool("returnToEntry") ?: base.returnToEntry,
+                returnWaitMs = ms("returnWaitMs", base.returnWaitMs),
                 maxHops = n("maxHops", base.maxHops, 100).coerceAtLeast(5),
                 maxProbes = n("maxProbes", base.maxProbes, 5),
             )
@@ -105,7 +107,7 @@ data class SiteRules(
         private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
         private fun JsonObject.int(k: String) = (this[k] as? JsonPrimitive)?.intOrNull
         private fun JsonObject.long(k: String) = (this[k] as? JsonPrimitive)?.longOrNull
-        @Suppress("unused") private fun JsonObject.bool(k: String) = (this[k] as? JsonPrimitive)?.booleanOrNull
+        private fun JsonObject.bool(k: String) = (this[k] as? JsonPrimitive)?.booleanOrNull
         private fun JsonObject.hosts(k: String): Set<String> {
             val arr = this[k] as? JsonArray ?: return emptySet()
             return arr.map { el ->

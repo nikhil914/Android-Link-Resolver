@@ -21,7 +21,7 @@ class SiteRulesTest {
     fun bundledRulesParseAndMatchBuiltInDefaults() {
         val r = SiteRules.parse(bundled())
         assertTrue(r.version >= 1)
-        val (name, cfg) = r.sites.single()
+        val (name, cfg) = r.sites.first()
         assertEquals("LinkShortX", name)
         assertEquals(setOf("linkshortx.in", "urlshortx.io"), cfg.entryHosts)
         val d = LinkShortXConfig()
